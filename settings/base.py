@@ -246,6 +246,11 @@ _CELERY_REDIS_URL, _CHANNELS_REDIS_URL = parse_redis_url(
 )
 _REDIS_KEY_PREFIX = os.getenv("PAPERLESS_REDIS_PREFIX", "")
 
+# Change to public variables
+CELERY_REDIS_URL = _CELERY_REDIS_URL
+CHANNELS_REDIS_URL = _CHANNELS_REDIS_URL
+REDIS_KEY_PREFIX = _REDIS_KEY_PREFIX
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",

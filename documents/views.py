@@ -3611,21 +3611,21 @@ class StatisticsView(GenericAPIView[Any]):
             if can_view_global_stats
             else get_objects_for_user_owner_aware(
                 user,
-                "documents.view_document",
+                "view_document",
                 Document,
             )
         )
         tags = (
             Tag.objects.all()
             if can_view_global_stats
-            else get_objects_for_user_owner_aware(user, "documents.view_tag", Tag)
+            else get_objects_for_user_owner_aware(user, "view_tag", Tag)
         ).only("id", "is_inbox_tag")
         correspondent_count = (
             Correspondent.objects.count()
             if can_view_global_stats
             else get_objects_for_user_owner_aware(
                 user,
-                "documents.view_correspondent",
+                "view_correspondent",
                 Correspondent,
             ).count()
         )
@@ -3634,7 +3634,7 @@ class StatisticsView(GenericAPIView[Any]):
             if can_view_global_stats
             else get_objects_for_user_owner_aware(
                 user,
-                "documents.view_documenttype",
+                "view_documenttype",
                 DocumentType,
             ).count()
         )
@@ -3643,7 +3643,7 @@ class StatisticsView(GenericAPIView[Any]):
             if can_view_global_stats
             else get_objects_for_user_owner_aware(
                 user,
-                "documents.view_storagepath",
+                "view_storagepath",
                 StoragePath,
             ).count()
         )
@@ -4881,7 +4881,7 @@ class SystemStatusView(PassUserMixin):
 
         media_stats = os.statvfs(settings.MEDIA_ROOT)
 
-        redis_url = settings._CHANNELS_REDIS_URL
+        redis_url = settings.CHANNELS_REDIS_URL
         redis_url_parsed = urlparse(redis_url)
         redis_constructed_url = f"{redis_url_parsed.scheme}://{redis_url_parsed.path or redis_url_parsed.hostname}"
         if redis_url_parsed.hostname is not None:
@@ -4902,16 +4902,13 @@ class SystemStatusView(PassUserMixin):
         celery_url = None
         try:
             celery_ping = celery_app.control.inspect().ping()
-            celery_url = next(iter(celery_ping.keys()))
-            first_worker_ping = celery_ping[celery_url]
-            if first_worker_ping["ok"] == "pong":
-                celery_active = "OK"
+            if celery_ping:
+                celery_url = next(iter(celery_ping.keys()))
+            else:
+                celery_url = None
         except Exception as e:
-            celery_active = "ERROR"
-            logger.exception(
-                f"System status detected a possible problem while connecting to celery: {e}",
-            )
-            celery_error = "Error connecting to celery, check logs for more detail."
+            logger.error(f"System status detected a possible problem while connecting to celery: {e}")
+            celery_url = None
 
         index_error = None
         try:
