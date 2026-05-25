@@ -31,6 +31,7 @@ from documents.views import ShareLinkViewSet
 from documents.views import StatisticsView
 from documents.views import StoragePathViewSet
 from documents.views import StudentRecordView
+from documents.views import StudentRecordPdfView
 from documents.views import SystemStatusView
 from documents.views import TagViewSet
 from documents.views import TasksViewSet
@@ -139,6 +140,11 @@ api_urlpatterns = [
         r"^student_records/(?P<document_id>\d+)/$",
         StudentRecordView.as_view(),
         name="student_record",
+    ),
+    re_path(
+        r"^student_records/(?P<document_id>\d+)/pdf/$",
+        StudentRecordPdfView.as_view(),
+        name="student_record_pdf",
     ),
     re_path("^trash/", TrashView.as_view(), name="trash"),
     *router.urls,

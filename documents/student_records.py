@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import json
 import logging
 import mimetypes
@@ -12,6 +13,7 @@ from typing import Any
 import requests
 from django.conf import settings
 from django.utils import timezone
+from fpdf import FPDF
 
 from documents.models import Document
 from documents.models import StudentRecord
@@ -429,6 +431,147 @@ def student_record_needs_review(
             return True
 
     return False
+
+
+def _pdf_text(value: Any) -> str:
+    text = str(value or "")
+    return text.encode("latin-1", "replace").decode("latin-1")
+
+
+def _pdf_field(pdf: FPDF, label: str, value: Any, width: int = 92) -> None:
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(34, 6, _pdf_text(label), border=1)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.cell(width, 6, _pdf_text(value), border=1)
+
+
+def export_student_record_pdf(record: StudentRecord) -> bytes:
+    data = {**blank_student_record_data(), **(record.data or {})}
+    data["documents_enclosed"] = {
+        **blank_student_record_data()["documents_enclosed"],
+        **(data.get("documents_enclosed") or {}),
+    }
+
+    pdf = FPDF(format="A4")
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.add_page()
+    pdf.set_margins(10, 10, 10)
+
+    pdf.set_font("Helvetica", "B", 15)
+    pdf.cell(0, 7, "University of Buea", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(
+        0,
+        6,
+        "Faculty of Engineering and Technology",
+        align="C",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 7, "Student's Record", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 8)
+    pdf.cell(
+        0,
+        5,
+        "(STRICTLY CONFIDENTIAL)",
+        align="C",
+        new_x="LMARGIN",
+        new_y="NEXT",
+    )
+    pdf.ln(2)
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 7, "I. Personal Information", border=1, fill=False, new_x="LMARGIN", new_y="NEXT")
+    rows = [
+        ("Department", data.get("department")),
+        ("Registration No", data.get("registration_no")),
+        ("Surname", data.get("surname")),
+        ("Maiden Name", data.get("maiden_name")),
+        ("Other Names", data.get("other_names")),
+        ("Date of Birth", data.get("date_of_birth")),
+        ("Sex", data.get("sex")),
+        ("Place of Birth", data.get("place_of_birth")),
+        ("Division of Origin", data.get("division_of_origin")),
+        ("Region of Origin", data.get("region_of_origin")),
+        ("Nationality", data.get("nationality")),
+        ("Marital Status", data.get("marital_status")),
+        ("Handicap", data.get("handicap")),
+        ("Religion", data.get("religious_denomination")),
+        ("Father's Name", data.get("father_name")),
+        ("Mother's Name", data.get("mother_name")),
+        ("Parent Occupation", data.get("parent_occupation")),
+    ]
+    for index in range(0, len(rows), 2):
+        _pdf_field(pdf, rows[index][0], rows[index][1])
+        if index + 1 < len(rows):
+            _pdf_field(pdf, rows[index + 1][0], rows[index + 1][1], width=30)
+        pdf.ln()
+
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 7, "Documents Enclosed", border=1, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 8)
+    for index, (name, checked) in enumerate(data["documents_enclosed"].items()):
+        mark = "Yes" if checked else "No"
+        pdf.cell(95, 6, _pdf_text(f"{name}: {mark}"), border=1)
+        if index % 2 == 1:
+            pdf.ln()
+    if len(data["documents_enclosed"]) % 2 == 1:
+        pdf.ln()
+
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 7, "Addresses", border=1, new_x="LMARGIN", new_y="NEXT")
+    for label, value in [
+        ("Parent/Guardian Name and Address", data.get("parent_name_address")),
+        ("Parent Post Box", data.get("parent_post_box")),
+        ("Parent Town", data.get("parent_town")),
+        ("Parent Country", data.get("parent_country")),
+        ("Parent Tel", data.get("parent_tel")),
+        ("Student Mailing Address", data.get("student_address")),
+        ("Student Post Box", data.get("student_post_box")),
+        ("Student Town", data.get("student_town")),
+        ("Student Country", data.get("student_country")),
+        ("Student Tel", data.get("student_tel")),
+    ]:
+        _pdf_field(pdf, label, value, width=155)
+        pdf.ln()
+
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 7, "II. Academic Records", border=1, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(35, 6, "Level", border=1)
+    pdf.cell(35, 6, "Year", border=1)
+    pdf.cell(75, 6, "School", border=1)
+    pdf.cell(45, 6, "Qualification", border=1, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 8)
+    for row in data.get("academic_records", []):
+        pdf.cell(35, 6, _pdf_text(row.get("level")), border=1)
+        pdf.cell(35, 6, _pdf_text(row.get("year")), border=1)
+        pdf.cell(75, 6, _pdf_text(row.get("school")), border=1)
+        pdf.cell(45, 6, _pdf_text(row.get("qualification")), border=1, new_x="LMARGIN", new_y="NEXT")
+
+    for title, exam in [
+        ("GCE O/L or Probatoire", data.get("gce_ol", {})),
+        ("GCE A/L or Baccalaureat", data.get("gce_al", {})),
+    ]:
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(0, 7, title, border=1, new_x="LMARGIN", new_y="NEXT")
+        _pdf_field(pdf, "Centre", exam.get("centre"), width=60)
+        _pdf_field(pdf, "Candidate No", exam.get("candidate_no"), width=28)
+        pdf.ln()
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(145, 6, "Subject", border=1)
+        pdf.cell(45, 6, "Grade", border=1, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 8)
+        for subject in exam.get("subjects", []):
+            pdf.cell(145, 6, _pdf_text(subject.get("subject")), border=1)
+            pdf.cell(45, 6, _pdf_text(subject.get("grade")), border=1, new_x="LMARGIN", new_y="NEXT")
+
+    return bytes(pdf.output(dest="S"))
 
 
 def _extract_student_record_from_text(text: str) -> tuple[dict[str, Any], dict[str, float]]:

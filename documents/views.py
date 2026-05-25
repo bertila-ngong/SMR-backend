@@ -10,6 +10,7 @@ from collections import deque
 from datetime import datetime
 from datetime import timedelta
 from http import HTTPStatus
+from io import BytesIO
 from pathlib import Path
 from time import mktime
 from typing import TYPE_CHECKING
@@ -21,8 +22,10 @@ from urllib.parse import quote
 from urllib.parse import urlparse
 
 import httpx
+import img2pdf
 import magic
 import pathvalidate
+from pikepdf import Pdf
 from django.conf import settings
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import User
@@ -177,6 +180,7 @@ from documents.permissions import has_global_statistics_permission
 from documents.permissions import has_perms_owner_aware
 from documents.permissions import has_system_status_permission
 from documents.permissions import set_permissions_for_object
+from documents.parsers import is_mime_type_supported
 from documents.plugins.date_parsing import get_date_parser
 from documents.schema import generate_object_with_permissions_schema
 from documents.search import SearchHit
@@ -220,6 +224,7 @@ from documents.serialisers import WorkflowSerializer
 from documents.serialisers import WorkflowTriggerSerializer
 from documents.signals import document_updated
 from documents.student_records import STUDENT_RECORD_DOCUMENT_TYPE
+from documents.student_records import export_student_record_pdf
 from documents.student_records import extract_student_record
 from documents.student_records import get_or_create_student_record
 from documents.student_records import student_record_needs_review
@@ -3102,6 +3107,40 @@ class PostDocumentView(GenericAPIView[Any]):
     serializer_class = PostDocumentSerializer
     parser_classes = (parsers.MultiPartParser,)
 
+    def _validated_upload_part(self, name: str, data: bytes) -> tuple[str, bytes, str]:
+        mime_type = magic.from_buffer(data, mime=True)
+        if not is_mime_type_supported(mime_type):
+            raise ValidationError(
+                _("File type %(type)s not supported") % {"type": mime_type},
+            )
+        return name, data, mime_type
+
+    def _combine_student_record_pages(
+        self,
+        files: list[tuple[str, bytes, str]],
+    ) -> tuple[str, bytes]:
+        if len(files) == 1:
+            return files[0][0], files[0][1]
+
+        merged_pdf = Pdf.new()
+        for name, data, mime_type in files:
+            if mime_type == "application/pdf":
+                source_pdf_bytes = data
+            elif mime_type.startswith("image/"):
+                source_pdf_bytes = img2pdf.convert(data)
+            else:
+                raise ValidationError(
+                    _("File type %(type)s not supported") % {"type": mime_type},
+                )
+
+            with Pdf.open(BytesIO(source_pdf_bytes)) as source_pdf:
+                merged_pdf.pages.extend(source_pdf.pages)
+
+        output = BytesIO()
+        merged_pdf.save(output)
+        base_name = pathvalidate.sanitize_filename(Path(files[0][0]).stem)
+        return f"{base_name}-student-record.pdf", output.getvalue()
+
     def post(self, request, *args, **kwargs):
         if not request.user.has_perm("documents.add_document"):
             return HttpResponseForbidden("Insufficient permissions")
@@ -3126,6 +3165,20 @@ class PostDocumentView(GenericAPIView[Any]):
                 defaults={"matching_algorithm": MatchingModel.MATCH_NONE},
             )
             document_type_id = document_type.id
+
+        if record_type == "student_record":
+            additional_documents = request.FILES.getlist("additional_documents")
+            if len(additional_documents) > 2:
+                raise ValidationError(
+                    _("Student records can contain at most three uploaded pages."),
+                )
+
+            files = [self._validated_upload_part(doc_name, doc_data)]
+            for upload in additional_documents:
+                files.append(
+                    self._validated_upload_part(upload.name, upload.file.read()),
+                )
+            doc_name, doc_data = self._combine_student_record_pages(files)
 
         t = int(mktime(datetime.now().timetuple()))
 
@@ -3242,6 +3295,19 @@ class StudentRecordView(GenericAPIView[Any]):
         record.reviewed_by = None
         record.save()
         return Response(self.get_serializer(record).data)
+
+
+class StudentRecordPdfView(StudentRecordView):
+    def get(self, request, document_id: int):
+        document = self.get_document(document_id)
+        record = get_or_create_student_record(document)
+        pdf_bytes = export_student_record_pdf(record)
+        filename = pathvalidate.sanitize_filename(
+            f"{document.title or f'document-{document.id}'}-student-record.pdf",
+        )
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 @extend_schema_view(
