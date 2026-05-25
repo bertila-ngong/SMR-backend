@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+import base64
+import logging
+import mimetypes
 import re
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+import requests
+from django.conf import settings
 from django.utils import timezone
 
 from documents.models import Document
 from documents.models import StudentRecord
 
+logger = logging.getLogger(__name__)
+
 STUDENT_RECORD_DOCUMENT_TYPE = "Student Record"
+REVIEW_CONFIDENCE_THRESHOLD = 0.75
+MISTRAL_TIMEOUT_SECONDS = 120
 
 DEFAULT_STUDENT_RECORD_DATA: dict[str, Any] = {
     "department": "",
@@ -80,6 +91,28 @@ FIELD_LABELS = {
     "parent_occupation": [r"parent\s+or\s+guardian'?s\s+occupation"],
 }
 
+REQUIRED_REVIEW_FIELDS = {
+    "department": "Department",
+    "registration_no": "Registration number",
+    "surname": "Surname",
+    "other_names": "Other names",
+    "date_of_birth": "Date of birth",
+    "sex": "Sex",
+    "place_of_birth": "Place of birth",
+    "nationality": "Nationality",
+    "father_name": "Father's name",
+    "mother_name": "Mother's name",
+}
+
+
+@dataclass(slots=True)
+class StudentRecordExtraction:
+    data: dict[str, Any]
+    confidence: dict[str, float]
+    raw_text: str
+    source: str
+    error: str = ""
+
 
 def blank_student_record_data() -> dict[str, Any]:
     data = DEFAULT_STUDENT_RECORD_DATA.copy()
@@ -96,6 +129,85 @@ def _clean(value: str) -> str:
     return re.sub(r"\s+", " ", value or "").strip(" :-\t\r\n")
 
 
+def _document_file_path(document: Document) -> Path | None:
+    if document.source_path and document.source_path.is_file():
+        return document.source_path
+    if document.archive_path and document.archive_path.is_file():
+        return document.archive_path
+    return None
+
+
+def _mistral_document_payload(document: Document, file_path: Path) -> dict[str, Any]:
+    mime_type = document.mime_type or mimetypes.guess_type(file_path.name)[0]
+    mime_type = mime_type or "application/octet-stream"
+    encoded = base64.b64encode(file_path.read_bytes()).decode("ascii")
+    data_url = f"data:{mime_type};base64,{encoded}"
+
+    if mime_type.startswith("image/"):
+        return {
+            "type": "image_url",
+            "image_url": data_url,
+        }
+
+    return {
+        "type": "document_url",
+        "document_url": data_url,
+    }
+
+
+def _extract_text_from_mistral_response(response: dict[str, Any]) -> str:
+    parts: list[str] = []
+
+    document_annotation = response.get("document_annotation")
+    if isinstance(document_annotation, str) and document_annotation.strip():
+        parts.append(document_annotation)
+
+    for page in response.get("pages", []):
+        if not isinstance(page, dict):
+            continue
+        markdown = page.get("markdown")
+        if isinstance(markdown, str) and markdown.strip():
+            parts.append(markdown)
+            continue
+        text = page.get("text")
+        if isinstance(text, str) and text.strip():
+            parts.append(text)
+
+    return "\n\n".join(parts).strip()
+
+
+def _mistral_ocr(document: Document) -> tuple[str, str]:
+    api_key = getattr(settings, "MISTRAL_API_KEY", "")
+    if not api_key:
+        return "", "MISTRAL_API_KEY is not configured."
+
+    file_path = _document_file_path(document)
+    if not file_path:
+        return "", "The original document file could not be found."
+
+    payload = {
+        "model": getattr(settings, "MISTRAL_OCR_MODEL", "mistral-ocr-latest"),
+        "document": _mistral_document_payload(document, file_path),
+        "include_image_base64": False,
+        "confidence_scores_granularity": "page",
+    }
+
+    response = requests.post(
+        getattr(settings, "MISTRAL_OCR_ENDPOINT", "https://api.mistral.ai/v1/ocr"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=MISTRAL_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    text = _extract_text_from_mistral_response(response.json())
+    if not text:
+        return "", "Mistral OCR returned no readable text."
+    return text, ""
+
+
 def _extract_label_value(text: str, labels: list[str]) -> tuple[str, float]:
     for label in labels:
         match = re.search(
@@ -105,7 +217,7 @@ def _extract_label_value(text: str, labels: list[str]) -> tuple[str, float]:
         )
         if match:
             value = _clean(match.group(1))
-            return value[:160], 0.72 if value else 0.2
+            return value[:160], 0.78 if value else 0.2
     return "", 0.0
 
 
@@ -126,7 +238,10 @@ def _extract_subjects(text: str, marker: str, limit: int) -> list[dict[str, str]
     chunk = text[marker_match.end() : marker_match.end() + 1000]
     subjects = []
     for line in chunk.splitlines():
-        match = re.search(r"([A-Za-z][A-Za-z /&-]{2,})\s+([A-F][0-9]?|[0-9])$", line.strip())
+        match = re.search(
+            r"([A-Za-z][A-Za-z /&-]{2,})\s+([A-F][0-9]?|[0-9])$",
+            line.strip(),
+        )
         if match:
             subjects.append(
                 {
@@ -139,8 +254,24 @@ def _extract_subjects(text: str, marker: str, limit: int) -> list[dict[str, str]
     return subjects
 
 
-def extract_student_record(document: Document) -> tuple[dict[str, Any], dict[str, float]]:
-    text = document.content or ""
+def student_record_needs_review(
+    data: dict[str, Any],
+    confidence: dict[str, float],
+    extraction_error: str = "",
+) -> bool:
+    if extraction_error:
+        return True
+
+    for field in REQUIRED_REVIEW_FIELDS:
+        if not _clean(str(data.get(field, ""))):
+            return True
+        if confidence.get(field, 0) < REVIEW_CONFIDENCE_THRESHOLD:
+            return True
+
+    return False
+
+
+def _extract_student_record_from_text(text: str) -> tuple[dict[str, Any], dict[str, float]]:
     data = blank_student_record_data()
     confidence: dict[str, float] = {}
 
@@ -174,11 +305,59 @@ def extract_student_record(document: Document) -> tuple[dict[str, Any], dict[str
     return data, confidence
 
 
+def extract_student_record(document: Document) -> StudentRecordExtraction:
+    source = "mistral"
+    error = ""
+    try:
+        text, error = _mistral_ocr(document)
+    except requests.RequestException as exc:
+        logger.warning("Mistral OCR failed for document %s: %s", document.pk, exc)
+        text = ""
+        error = f"Mistral OCR failed: {exc}"
+
+    if not text:
+        source = "document_content"
+        text = document.content or ""
+        if not error:
+            error = "Falling back to the existing OCR text."
+
+    data, confidence = _extract_student_record_from_text(text)
+    if source != "mistral":
+        confidence = {field: min(score, 0.55) for field, score in confidence.items()}
+
+    return StudentRecordExtraction(
+        data=data,
+        confidence=confidence,
+        raw_text=text,
+        source=source,
+        error=error if source != "mistral" else "",
+    )
+
+
 def get_or_create_student_record(document: Document) -> StudentRecord:
     record, created = StudentRecord.objects.get_or_create(document=document)
     if created or not record.data:
-        record.data, record.confidence = extract_student_record(document)
-        record.needs_review = True
+        extraction = extract_student_record(document)
+        record.data = extraction.data
+        record.confidence = extraction.confidence
+        record.raw_text = extraction.raw_text
+        record.extraction_source = extraction.source
+        record.extraction_error = extraction.error
+        record.needs_review = student_record_needs_review(
+            extraction.data,
+            extraction.confidence,
+            extraction.error,
+        )
         record.extracted_at = timezone.now()
-        record.save(update_fields=["data", "confidence", "needs_review", "extracted_at"])
+        record.save(
+            update_fields=[
+                "data",
+                "confidence",
+                "raw_text",
+                "extraction_source",
+                "extraction_error",
+                "needs_review",
+                "extracted_at",
+            ],
+        )
     return record

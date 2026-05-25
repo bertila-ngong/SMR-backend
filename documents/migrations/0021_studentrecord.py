@@ -40,6 +40,31 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 (
+                    "raw_text",
+                    models.TextField(
+                        blank=True,
+                        default="",
+                        verbose_name="raw extracted text",
+                    ),
+                ),
+                (
+                    "extraction_source",
+                    models.CharField(
+                        blank=True,
+                        default="",
+                        max_length=32,
+                        verbose_name="extraction source",
+                    ),
+                ),
+                (
+                    "extraction_error",
+                    models.TextField(
+                        blank=True,
+                        default="",
+                        verbose_name="extraction error",
+                    ),
+                ),
+                (
                     "needs_review",
                     models.BooleanField(default=True, verbose_name="needs review"),
                 ),

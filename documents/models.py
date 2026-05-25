@@ -1246,6 +1246,17 @@ class StudentRecord(models.Model):
         blank=True,
     )
 
+    raw_text = models.TextField(_("raw extracted text"), blank=True, default="")
+
+    extraction_source = models.CharField(
+        _("extraction source"),
+        max_length=32,
+        blank=True,
+        default="",
+    )
+
+    extraction_error = models.TextField(_("extraction error"), blank=True, default="")
+
     needs_review = models.BooleanField(_("needs review"), default=True)
 
     extracted_at = models.DateTimeField(_("date extracted"), null=True, blank=True)

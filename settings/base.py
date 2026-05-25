@@ -41,6 +41,10 @@ for path in [
         load_dotenv(path)
         break
 
+local_env_path = Path(__file__).resolve().parent.parent / ".env"
+if local_env_path.exists():
+    load_dotenv(local_env_path)
+
 # There are multiple levels of concurrency in paperless:
 #  - Multiple consumers may be run in parallel.
 #  - Each consumer may process multiple pages in parallel.
@@ -1171,6 +1175,13 @@ WEBHOOKS_ALLOW_INTERNAL_REQUESTS = get_bool_from_env(
 REMOTE_OCR_ENGINE = os.getenv("PAPERLESS_REMOTE_OCR_ENGINE")
 REMOTE_OCR_API_KEY = os.getenv("PAPERLESS_REMOTE_OCR_API_KEY")
 REMOTE_OCR_ENDPOINT = os.getenv("PAPERLESS_REMOTE_OCR_ENDPOINT")
+
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+MISTRAL_OCR_ENDPOINT = os.getenv(
+    "MISTRAL_OCR_ENDPOINT",
+    "https://api.mistral.ai/v1/ocr",
+)
+MISTRAL_OCR_MODEL = os.getenv("MISTRAL_OCR_MODEL", "mistral-ocr-latest")
 
 ################################################################################
 # AI Settings                                                                  #

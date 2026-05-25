@@ -222,6 +222,7 @@ from documents.signals import document_updated
 from documents.student_records import STUDENT_RECORD_DOCUMENT_TYPE
 from documents.student_records import extract_student_record
 from documents.student_records import get_or_create_student_record
+from documents.student_records import student_record_needs_review
 from documents.tasks import build_share_link_bundle
 from documents.tasks import consume_file
 from documents.tasks import empty_trash
@@ -3225,8 +3226,17 @@ class StudentRecordView(GenericAPIView[Any]):
             raise PermissionDenied("Insufficient permissions")
 
         record = get_or_create_student_record(document)
-        record.data, record.confidence = extract_student_record(document)
-        record.needs_review = True
+        extraction = extract_student_record(document)
+        record.data = extraction.data
+        record.confidence = extraction.confidence
+        record.raw_text = extraction.raw_text
+        record.extraction_source = extraction.source
+        record.extraction_error = extraction.error
+        record.needs_review = student_record_needs_review(
+            extraction.data,
+            extraction.confidence,
+            extraction.error,
+        )
         record.extracted_at = timezone.now()
         record.reviewed_at = None
         record.reviewed_by = None
