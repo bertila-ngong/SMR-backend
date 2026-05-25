@@ -152,12 +152,14 @@ from documents.models import CustomField
 from documents.models import CustomFieldInstance
 from documents.models import Document
 from documents.models import DocumentType
+from documents.models import MatchingModel
 from documents.models import Note
 from documents.models import PaperlessTask
 from documents.models import SavedView
 from documents.models import ShareLink
 from documents.models import ShareLinkBundle
 from documents.models import StoragePath
+from documents.models import StudentRecord
 from documents.models import Tag
 from documents.models import UiSettings
 from documents.models import Workflow
@@ -206,6 +208,7 @@ from documents.serialisers import ShareLinkBundleSerializer
 from documents.serialisers import ShareLinkSerializer
 from documents.serialisers import StoragePathSerializer
 from documents.serialisers import StoragePathTestSerializer
+from documents.serialisers import StudentRecordSerializer
 from documents.serialisers import TagSerializer
 from documents.serialisers import TaskSerializerV9
 from documents.serialisers import TaskSerializerV10
@@ -216,6 +219,9 @@ from documents.serialisers import WorkflowActionSerializer
 from documents.serialisers import WorkflowSerializer
 from documents.serialisers import WorkflowTriggerSerializer
 from documents.signals import document_updated
+from documents.student_records import STUDENT_RECORD_DOCUMENT_TYPE
+from documents.student_records import extract_student_record
+from documents.student_records import get_or_create_student_record
 from documents.tasks import build_share_link_bundle
 from documents.tasks import consume_file
 from documents.tasks import empty_trash
@@ -3104,6 +3110,7 @@ class PostDocumentView(GenericAPIView[Any]):
         doc_name, doc_data = serializer.validated_data.get("document")
         correspondent_id = serializer.validated_data.get("correspondent")
         document_type_id = serializer.validated_data.get("document_type")
+        record_type = serializer.validated_data.get("record_type")
         storage_path_id = serializer.validated_data.get("storage_path")
         tag_ids = serializer.validated_data.get("tags")
         title = serializer.validated_data.get("title")
@@ -3111,6 +3118,13 @@ class PostDocumentView(GenericAPIView[Any]):
         archive_serial_number = serializer.validated_data.get("archive_serial_number")
         cf = serializer.validated_data.get("custom_fields")
         from_webui = serializer.validated_data.get("from_webui")
+
+        if record_type == "student_record" and document_type_id is None:
+            document_type, _ = DocumentType.objects.get_or_create(
+                name=STUDENT_RECORD_DOCUMENT_TYPE,
+                defaults={"matching_algorithm": MatchingModel.MATCH_NONE},
+            )
+            document_type_id = document_type.id
 
         t = int(mktime(datetime.now().timetuple()))
 
@@ -3158,6 +3172,66 @@ class PostDocumentView(GenericAPIView[Any]):
         )
 
         return Response(async_task.id)
+
+
+class StudentRecordView(GenericAPIView[Any]):
+    permission_classes = (IsAuthenticated,)
+    serializer_class = StudentRecordSerializer
+
+    def get_document(self, document_id: int) -> Document:
+        document = get_object_or_404(
+            Document.objects.select_related("owner", "document_type"),
+            pk=document_id,
+        )
+        if self.request.user is not None and not has_perms_owner_aware(
+            self.request.user,
+            "view_document",
+            document,
+        ):
+            raise PermissionDenied("Insufficient permissions")
+        return document
+
+    def get(self, request, document_id: int):
+        document = self.get_document(document_id)
+        record = get_or_create_student_record(document)
+        return Response(self.get_serializer(record).data)
+
+    def patch(self, request, document_id: int):
+        document = self.get_document(document_id)
+        if request.user is not None and not has_perms_owner_aware(
+            request.user,
+            "change_document",
+            document,
+        ):
+            raise PermissionDenied("Insufficient permissions")
+
+        record = get_or_create_student_record(document)
+        serializer = self.get_serializer(record, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(
+            needs_review=request.data.get("needs_review", False),
+            reviewed_at=timezone.now(),
+            reviewed_by=request.user,
+        )
+        return Response(serializer.data)
+
+    def post(self, request, document_id: int):
+        document = self.get_document(document_id)
+        if request.user is not None and not has_perms_owner_aware(
+            request.user,
+            "change_document",
+            document,
+        ):
+            raise PermissionDenied("Insufficient permissions")
+
+        record = get_or_create_student_record(document)
+        record.data, record.confidence = extract_student_record(document)
+        record.needs_review = True
+        record.extracted_at = timezone.now()
+        record.reviewed_at = None
+        record.reviewed_by = None
+        record.save()
+        return Response(self.get_serializer(record).data)
 
 
 @extend_schema_view(

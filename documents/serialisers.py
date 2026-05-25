@@ -69,6 +69,7 @@ from documents.models import SavedViewFilterRule
 from documents.models import ShareLink
 from documents.models import ShareLinkBundle
 from documents.models import StoragePath
+from documents.models import StudentRecord
 from documents.models import Tag
 from documents.models import UiSettings
 from documents.models import Workflow
@@ -2157,6 +2158,13 @@ class PostDocumentSerializer(serializers.Serializer[dict[str, Any]]):
         required=False,
     )
 
+    record_type = serializers.ChoiceField(
+        choices=["student_record"],
+        label="Record type",
+        write_only=True,
+        required=False,
+    )
+
     def validate_document(self, document):
         document_data = document.file.read()
         mime_type = magic.from_buffer(document_data, mime=True)
@@ -2260,6 +2268,29 @@ class PostDocumentSerializer(serializers.Serializer[dict[str, Any]]):
         # support datetime format for created for backwards compatibility
         if isinstance(created, datetime):
             return created.date()
+
+
+class StudentRecordSerializer(serializers.ModelSerializer[StudentRecord]):
+    class Meta:
+        model = StudentRecord
+        fields = (
+            "id",
+            "document",
+            "data",
+            "confidence",
+            "needs_review",
+            "extracted_at",
+            "reviewed_at",
+            "reviewed_by",
+        )
+        read_only_fields = (
+            "id",
+            "document",
+            "confidence",
+            "extracted_at",
+            "reviewed_at",
+            "reviewed_by",
+        )
 
 
 class DocumentVersionSerializer(serializers.Serializer[dict[str, Any]]):

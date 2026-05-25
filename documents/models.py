@@ -1226,6 +1226,50 @@ class CustomFieldInstance(SoftDeleteModel):
         return str(self.value)
 
 
+class StudentRecord(models.Model):
+    document = models.OneToOneField(
+        Document,
+        on_delete=models.CASCADE,
+        related_name="student_record",
+        verbose_name=_("document"),
+    )
+
+    data = models.JSONField(
+        _("student record data"),
+        default=dict,
+        blank=True,
+    )
+
+    confidence = models.JSONField(
+        _("field confidence"),
+        default=dict,
+        blank=True,
+    )
+
+    needs_review = models.BooleanField(_("needs review"), default=True)
+
+    extracted_at = models.DateTimeField(_("date extracted"), null=True, blank=True)
+
+    reviewed_at = models.DateTimeField(_("date reviewed"), null=True, blank=True)
+
+    reviewed_by = models.ForeignKey(
+        User,
+        blank=True,
+        null=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_student_records",
+        verbose_name=_("reviewed by"),
+    )
+
+    class Meta:
+        verbose_name = _("student record")
+        verbose_name_plural = _("student records")
+
+    def __str__(self):
+        return f"StudentRecord for document {self.document_id}"
+
+
 if settings.AUDIT_LOG_ENABLED:
     auditlog.register(
         Document,
@@ -1238,6 +1282,7 @@ if settings.AUDIT_LOG_ENABLED:
     auditlog.register(Note)
     auditlog.register(CustomField)
     auditlog.register(CustomFieldInstance)
+    auditlog.register(StudentRecord)
 
 
 class WorkflowTrigger(models.Model):
