@@ -1182,6 +1182,11 @@ MISTRAL_OCR_ENDPOINT = os.getenv(
     "https://api.mistral.ai/v1/ocr",
 )
 MISTRAL_OCR_MODEL = os.getenv("MISTRAL_OCR_MODEL", "mistral-ocr-latest")
+MISTRAL_CHAT_ENDPOINT = os.getenv(
+    "MISTRAL_CHAT_ENDPOINT",
+    "https://api.mistral.ai/v1/chat/completions",
+)
+MISTRAL_EXTRACT_MODEL = os.getenv("MISTRAL_EXTRACT_MODEL", "mistral-large-latest")
 
 ################################################################################
 # AI Settings                                                                  #
