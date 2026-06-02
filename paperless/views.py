@@ -6,8 +6,10 @@ from django.contrib.auth.models import User
 from django.db.models.functions import Lower
 from django.http import HttpResponseForbidden
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.filters import OrderingFilter
 from rest_framework.generics import GenericAPIView
 from rest_framework.pagination import PageNumberPagination
@@ -16,12 +18,14 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.viewsets import ModelViewSet
 
+from documents.models import StudentProfile
 from documents.permissions import PaperlessObjectPermissions
 from paperless.filters import GroupFilterSet
 from paperless.filters import UserFilterSet
 from paperless.serialisers import GroupSerializer
 from paperless.serialisers import PaperlessAuthTokenSerializer
 from paperless.serialisers import ProfileSerializer
+from paperless.serialisers import StudentSerializer
 from paperless.serialisers import UserSerializer
 
 
@@ -149,3 +153,41 @@ class ProfileView(GenericAPIView[Any]):
             setattr(user, key, value)
         user.save()
         return Response(self.get_serializer(user).data)
+
+
+class StudentsViewSet(ModelViewSet[StudentProfile]):
+    """ViewSet for managing student profiles."""
+
+    queryset = StudentProfile.objects.select_related("user").order_by(
+        Lower("user__username")
+    )
+    serializer_class = StudentSerializer
+    pagination_class = StandardPagination
+    permission_classes = (IsAuthenticated,)
+    filter_backends = (OrderingFilter,)
+    ordering_fields = ("created_at", "matricule", "user__username")
+
+    def get_queryset(self):
+        """Only admins can view/manage students."""
+        user = self.request.user
+        if not (user.is_staff or user.is_superuser):
+            # Non-admins can only view their own profile
+            return StudentProfile.objects.filter(user=user)
+        return self.queryset
+
+    def check_object_permissions(self, request, obj):
+        """Only admins or the student themselves can modify."""
+        if not (request.user.is_staff or request.user.is_superuser):
+            if request.method not in ("GET", "HEAD", "OPTIONS"):
+                if obj.user != request.user:
+                    raise PermissionDenied("You can only modify your own profile")
+        return super().check_object_permissions(request, obj)
+
+    def destroy(self, request, *args, **kwargs):
+        """Delete a student and their associated user."""
+        student = self.get_object()
+        user = student.user
+        # Delete the student profile and user
+        student.delete()
+        user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

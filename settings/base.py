@@ -293,6 +293,11 @@ if DEBUG:  # pragma: no cover
     EMAIL_BACKEND = "django.core.mail.backends.filebased.EmailBackend"
     EMAIL_FILE_PATH = BASE_DIR / "sent_emails"
 
+# Authentication settings
+DISABLE_REGULAR_LOGIN: Final[bool] = get_bool_from_env("PAPERLESS_DISABLE_REGULAR_LOGIN", "false")
+REDIRECT_LOGIN_TO_SSO: Final[bool] = get_bool_from_env("PAPERLESS_REDIRECT_LOGIN_TO_SSO", "false")
+ACCOUNT_ALLOW_SIGNUPS: Final[bool] = get_bool_from_env("PAPERLESS_ACCOUNT_ALLOW_SIGNUPS", "false")
+
 ###############################################################################
 # Security                                                                    #
 ###############################################################################

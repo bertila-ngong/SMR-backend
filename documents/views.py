@@ -16,7 +16,6 @@ from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from django.views.generic import TemplateView
 from pikepdf import Pdf
 from rest_framework import parsers
 from rest_framework.exceptions import PermissionDenied
@@ -46,10 +45,6 @@ from documents.student_records import extract_student_record
 from documents.student_records import get_or_create_student_record
 from documents.student_records import student_record_needs_review
 from documents.tasks import consume_file
-
-
-class IndexView(TemplateView):
-    template_name = "index.html"
 
 
 class PostDocumentView(GenericAPIView[Any]):
@@ -92,7 +87,15 @@ class PostDocumentView(GenericAPIView[Any]):
         return f"{base_name}-student-record.pdf", output.getvalue()
 
     def post(self, request, *args, **kwargs):
+        # Debug: Check user permissions
+        import logging
+        logger = logging.getLogger("paperless.views")
+        logger.info(f"Document upload attempt by user: {request.user.username}")
+        logger.info(f"User permissions: {list(request.user.user_permissions.values_list('codename', flat=True))}")
+        logger.info(f"User has 'documents.add_document': {request.user.has_perm('documents.add_document')}")
+        
         if not request.user.has_perm("documents.add_document"):
+            logger.warning(f"User {request.user.username} denied document upload - insufficient permissions")
             return HttpResponseForbidden("Insufficient permissions")
 
         serializer = self.get_serializer(data=request.data)

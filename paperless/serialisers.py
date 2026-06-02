@@ -205,3 +205,133 @@ class ProfileSerializer(PasswordValidationMixin, serializers.ModelSerializer[Use
     def get_password_change_required(self, user: User) -> bool:
         profile = getattr(user, "student_profile", None)
         return bool(profile and profile.password_change_required)
+
+
+class StudentSerializer(PasswordValidationMixin, serializers.Serializer):
+    """Serializer for creating and managing student accounts."""
+
+    id = serializers.IntegerField(read_only=True)
+    user = serializers.IntegerField(read_only=True, source="user.id")
+    username = serializers.CharField(max_length=150, write_only=True)
+    password = PasswordField(required=False, write_only=True)
+    email = serializers.EmailField(required=False)
+    first_name = serializers.CharField(max_length=150, required=False)
+    last_name = serializers.CharField(max_length=150, required=False)
+    matricule = serializers.CharField(max_length=64)
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+    password_change_required = serializers.BooleanField(
+        default=True,
+        write_only=True,
+    )
+    created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+    def validate_username(self, value: str) -> str:
+        """Ensure username is unique."""
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError("Username already exists.")
+        return value
+
+    def validate_matricule(self, value: str) -> str:
+        """Ensure matricule is unique."""
+        instance = self.instance
+        qs = StudentProfile.objects.filter(matricule=value)
+        if instance:
+            qs = qs.exclude(user_id=instance.user_id)
+        if qs.exists():
+            raise serializers.ValidationError("Matricule already exists.")
+        return value
+
+    def validate_password(self, value: str) -> str:
+        """Validate password strength if provided."""
+        if not self._has_real_password(value):
+            return value
+        validate_password(value)
+        return value
+
+    def create(self, validated_data):
+        """Create a new user and student profile."""
+        username = validated_data.pop("username")
+        password = validated_data.pop("password", None)
+        matricule = validated_data.pop("matricule")
+        password_change_required = validated_data.pop("password_change_required", True)
+        email = validated_data.pop("email", "")
+        first_name = validated_data.pop("first_name", "")
+        last_name = validated_data.pop("last_name", "")
+        date_of_birth = validated_data.pop("date_of_birth", None)
+
+        # Create user
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+        )
+        if password:
+            user.set_password(password)
+        user.save()
+
+        # Create student profile
+        student_profile = StudentProfile.objects.create(
+            user=user,
+            matricule=matricule,
+            date_of_birth=date_of_birth,
+            password_change_required=password_change_required,
+        )
+
+        # Ensure student has permission to add documents
+        # (also done via signal handler, but this ensures it's always set)
+        self._ensure_student_permissions(user)
+
+        # Send credentials email if password was set
+        if password:
+            send_student_credentials_email(user, password)
+
+        return student_profile
+
+    def _ensure_student_permissions(self, user: User) -> None:
+        """Assign required permissions to a student user."""
+        permissions = Permission.objects.filter(
+            codename__in=["add_document", "view_document", "change_document", "view_documenttype"],
+        )
+        user.user_permissions.add(*permissions)
+
+    def update(self, instance, validated_data):
+        """Update an existing student profile."""
+        password = validated_data.pop("password", None)
+
+        # Update user fields
+        user = instance.user
+        for field in ["email", "first_name", "last_name"]:
+            if field in validated_data:
+                setattr(user, field, validated_data.pop(field))
+        if password:
+            user.set_password(password)
+        user.save()
+
+        # Update student profile fields
+        for field in ["matricule", "date_of_birth", "password_change_required"]:
+            if field in validated_data:
+                setattr(instance, field, validated_data[field])
+        instance.save()
+
+        # Ensure permissions are set
+        self._ensure_student_permissions(user)
+
+        return instance
+
+    def to_representation(self, instance):
+        """Return student data with related user info."""
+        return {
+            "id": instance.id,
+            "user": instance.user.id,
+            "username": instance.user.username,
+            "email": instance.user.email,
+            "first_name": instance.user.first_name,
+            "last_name": instance.user.last_name,
+            "matricule": instance.matricule,
+            "date_of_birth": instance.date_of_birth,
+            "password_change_required": instance.password_change_required,
+            "created_at": instance.created_at,
+            "updated_at": instance.updated_at,
+        }
