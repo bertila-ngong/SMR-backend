@@ -4,20 +4,9 @@ from drf_spectacular.utils import OpenApiParameter
 from drf_spectacular.utils import extend_schema
 
 
-class AngularApiAuthenticationOverrideScheme(OpenApiAuthenticationExtension):
-    target_class = "paperless.auth.AngularApiAuthenticationOverride"
-    name = "AngularApiAuthenticationOverride"
-
-    def get_security_definition(self, auto_schema):  # pragma: no cover
-        return {
-            "type": "http",
-            "scheme": "basic",
-        }
-
-
-class PaperelessBasicAuthenticationScheme(OpenApiAuthenticationExtension):
+class PaperlessBasicAuthenticationScheme(OpenApiAuthenticationExtension):
     target_class = "paperless.auth.PaperlessBasicAuthentication"
-    name = "PaperelessBasicAuthentication"
+    name = "PaperlessBasicAuthentication"
 
     def get_security_definition(self, auto_schema):
         return {

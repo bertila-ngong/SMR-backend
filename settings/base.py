@@ -259,7 +259,7 @@ TEMPLATES = [
 
 _CHANNELS_BACKEND = os.environ.get(
     "PAPERLESS_CHANNELS_BACKEND",
-    "channels_redis.pubsub.RedisPubSubChannelLayer",
+    "channels.layers.InMemoryChannelLayer",
 )
 CHANNEL_LAYERS = {
     "default": {
@@ -273,6 +273,10 @@ if _CHANNELS_BACKEND.startswith("channels_redis."):
         "capacity": 2000,  # default 100
         "expiry": 15,  # default 60
         "prefix": _REDIS_KEY_PREFIX,
+    }
+elif _CHANNELS_BACKEND == "channels.layers.InMemoryChannelLayer":
+    CHANNEL_LAYERS["default"]["CONFIG"] = {
+        "expiry": 15,
     }
 
 ###############################################################################
