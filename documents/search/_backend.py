@@ -5,9 +5,9 @@ import re
 import threading
 from datetime import UTC
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum
 from typing import TYPE_CHECKING
-from typing import Self
+from typing_extensions import Self
 from typing import TypedDict
 from typing import TypeVar
 from typing import cast
@@ -49,7 +49,7 @@ _AUTOCOMPLETE_REGEX_TIMEOUT = 1.0  # seconds; guards against ReDoS on untrusted 
 T = TypeVar("T")
 
 
-class SearchMode(StrEnum):
+class SearchMode(str, Enum):
     QUERY = "query"
     TEXT = "text"
     TITLE = "title"

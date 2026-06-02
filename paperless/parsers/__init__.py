@@ -38,7 +38,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import Protocol
-from typing import Self
+from typing_extensions import Self
 from typing import TypedDict
 from typing import runtime_checkable
 

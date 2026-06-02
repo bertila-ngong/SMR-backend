@@ -3,7 +3,7 @@ import logging
 import os
 import shutil
 import tempfile
-from enum import StrEnum
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Final
@@ -100,7 +100,7 @@ class ConsumeFileDuplicateError(ConsumerError):
         self.in_trash = in_trash
 
 
-class ConsumerStatusShortMessage(StrEnum):
+class ConsumerStatusShortMessage(str, Enum):
     DOCUMENT_ALREADY_EXISTS = "document_already_exists"
     DOCUMENT_ALREADY_EXISTS_IN_TRASH = "document_already_exists_in_trash"
     ASN_ALREADY_EXISTS = "asn_already_exists"

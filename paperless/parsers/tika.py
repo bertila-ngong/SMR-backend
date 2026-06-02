@@ -15,7 +15,7 @@ import tempfile
 from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing import Self
+from typing_extensions import Self
 
 import httpx
 from django.conf import settings

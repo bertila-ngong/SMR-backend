@@ -1,7 +1,7 @@
 import enum
 from typing import TYPE_CHECKING
 from typing import Literal
-from typing import Self
+from typing_extensions import Self
 from typing import TypeAlias
 from typing import TypedDict
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from channels_redis.pubsub import RedisPubSubChannelLayer
 
 
-class ProgressStatusOptions(enum.StrEnum):
+class ProgressStatusOptions(str, enum.Enum):
     STARTED = "STARTED"
     WORKING = "WORKING"
     SUCCESS = "SUCCESS"

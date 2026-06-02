@@ -64,13 +64,9 @@ from documents.utils import IterWrapper
 from documents.utils import compute_checksum
 from documents.utils import identity
 from documents.workflows.utils import get_workflows_for_trigger
-from paperless.config import AIConfig
 from paperless.logging import consume_task_id
 from paperless.parsers import ParserContext
 from paperless.parsers.registry import get_parser_registry
-from paperless_ai.indexing import llm_index_add_or_update_document
-from paperless_ai.indexing import llm_index_remove_document
-from paperless_ai.indexing import update_llm_index
 
 if settings.AUDIT_LOG_ENABLED:
     from auditlog.models import LogEntry
@@ -268,12 +264,6 @@ def bulk_update_documents(document_ids) -> None:
         for doc in documents:
             batch.add_or_update(doc)
 
-    ai_config = AIConfig()
-    if ai_config.llm_index_enabled:
-        update_llm_index(
-            rebuild=False,
-        )
-
 
 @shared_task
 def update_document_content_maybe_archive_file(document_id) -> None:
@@ -382,10 +372,6 @@ def update_document_content_maybe_archive_file(document_id) -> None:
             from documents.search import get_backend
 
             get_backend().add_or_update(document)
-
-            ai_config = AIConfig()
-            if ai_config.llm_index_enabled:
-                llm_index_add_or_update_document(document)
 
             clear_document_caches(document.pk)
 
@@ -630,27 +616,18 @@ def llmindex_index(
     iter_wrapper: IterWrapper[Document] = identity,
     rebuild: bool = False,
 ) -> str | None:
-    ai_config = AIConfig()
-    if not ai_config.llm_index_enabled:  # pragma: no cover
-        logger.info("LLM index is disabled, skipping update.")
-        return None
-
-    from paperless_ai.indexing import update_llm_index
-
-    return update_llm_index(
-        iter_wrapper=iter_wrapper,
-        rebuild=rebuild,
-    )
+    logger.info("AI indexing is not part of this product.")
+    return None
 
 
 @shared_task
 def update_document_in_llm_index(document) -> None:
-    llm_index_add_or_update_document(document)
+    logger.info("AI indexing is not part of this product.")
 
 
 @shared_task
 def remove_document_from_llm_index(document) -> None:
-    llm_index_remove_document(document)
+    logger.info("AI indexing is not part of this product.")
 
 
 @shared_task

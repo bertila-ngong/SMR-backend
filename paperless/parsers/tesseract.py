@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 from typing import Final
 from typing import NoReturn
-from typing import Self
+from typing_extensions import Self
 
 from django.conf import settings
 from PIL import Image

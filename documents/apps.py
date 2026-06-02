@@ -13,6 +13,7 @@ class DocumentsConfig(AppConfig):
         from documents.signals.handlers import add_inbox_tags
         from documents.signals.handlers import add_or_update_document_in_llm_index
         from documents.signals.handlers import add_to_index
+        from documents.signals.handlers import assign_student_permissions  # noqa: F401
         from documents.signals.handlers import run_workflows_added
         from documents.signals.handlers import run_workflows_updated
         from documents.signals.handlers import send_websocket_document_updated

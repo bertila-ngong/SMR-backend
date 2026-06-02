@@ -13,7 +13,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing import Self
+from typing_extensions import Self
 
 from django.conf import settings
 from PIL import Image

@@ -45,6 +45,7 @@ from documents.models import DocumentType
 from documents.models import PaperlessTask
 from documents.models import SavedView
 from documents.models import StoragePath
+from documents.models import StudentProfile
 from documents.models import Tag
 from documents.models import UiSettings
 from documents.models import Workflow
@@ -1353,3 +1354,32 @@ def delete_document_from_llm_index(
         from documents.tasks import remove_document_from_llm_index
 
         remove_document_from_llm_index.apply_async(kwargs={"document": instance})
+
+
+@receiver(models.signals.post_save, sender=StudentProfile)
+def assign_student_permissions(
+    sender: Any,
+    instance: StudentProfile,
+    created: bool,
+    **kwargs: Any,
+) -> None:
+    """
+    Assign the add_document permission to a student when their profile is created.
+    This allows students to upload documents through the API.
+    """
+    from django.contrib.auth.models import Permission
+
+    logger.info(f"Signal received for StudentProfile: {instance.user.username}, created={created}")
+    
+    if created:
+        try:
+            add_doc_perm = Permission.objects.get(
+                content_type__app_label="documents",
+                codename="add_document",
+            )
+            instance.user.user_permissions.add(add_doc_perm)
+            logger.info(f"Permission 'documents.add_document' assigned to {instance.user.username}")
+        except Permission.DoesNotExist:
+            logger.warning("Permission 'documents.add_document' does not exist")
+        except Exception as e:
+            logger.error(f"Error assigning permission to {instance.user.username}: {str(e)}")
