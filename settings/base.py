@@ -66,17 +66,17 @@ DEBUG = get_bool_from_env("PAPERLESS_DEBUG", "NO")
 # Directories                                                                 #
 ###############################################################################
 
-BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
+BASE_DIR: Path = Path(__file__).resolve().parent.parent
 
-STATIC_ROOT = get_path_from_env("PAPERLESS_STATICDIR", BASE_DIR.parent / "static")
+STATIC_ROOT = get_path_from_env("PAPERLESS_STATICDIR", BASE_DIR / "static")
 
-MEDIA_ROOT = get_path_from_env("PAPERLESS_MEDIA_ROOT", BASE_DIR.parent / "media")
+MEDIA_ROOT = get_path_from_env("PAPERLESS_MEDIA_ROOT", BASE_DIR / "media")
 ORIGINALS_DIR = MEDIA_ROOT / "documents" / "originals"
 ARCHIVE_DIR = MEDIA_ROOT / "documents" / "archive"
 THUMBNAIL_DIR = MEDIA_ROOT / "documents" / "thumbnails"
 SHARE_LINK_BUNDLE_DIR = MEDIA_ROOT / "documents" / "share_link_bundles"
 
-DATA_DIR = get_path_from_env("PAPERLESS_DATA_DIR", BASE_DIR.parent / "data")
+DATA_DIR = get_path_from_env("PAPERLESS_DATA_DIR", BASE_DIR / "data")
 
 NLTK_DIR = get_path_from_env("PAPERLESS_NLTK_DIR", "/usr/share/nltk_data")
 
@@ -106,7 +106,7 @@ LOGGING_DIR = get_path_from_env("PAPERLESS_LOGGING_DIR", DATA_DIR / "log")
 
 CONSUMPTION_DIR = get_path_from_env(
     "PAPERLESS_CONSUMPTION_DIR",
-    BASE_DIR.parent / "consume",
+    BASE_DIR / "consume",
 )
 
 # This will be created if it doesn't exist
@@ -138,11 +138,6 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",
     "django_filters",
     "guardian",
-    "allauth",
-    "allauth.account",
-    "allauth.socialaccount",
-    "allauth.mfa",
-    "allauth.headless",
     "drf_spectacular",
     "drf_spectacular_sidecar",
     "treenode",
@@ -170,11 +165,6 @@ REST_FRAMEWORK = {
     },
 }
 
-if DEBUG:
-    REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"].append(
-        "paperless.auth.AngularApiAuthenticationOverride",
-    )
-
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -187,7 +177,6 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "allauth.account.middleware.AccountMiddleware",
 ]
 
 # Optional to enable compression
@@ -216,16 +205,12 @@ FORCE_SCRIPT_NAME, BASE_URL, LOGIN_URL, LOGIN_REDIRECT_URL, LOGOUT_REDIRECT_URL 
 
 # DRF Spectacular settings
 SPECTACULAR_SETTINGS = {
-    "TITLE": "Paperless-ngx REST API",
-    "DESCRIPTION": "OpenAPI Spec for Paperless-ngx",
-    "VERSION": "6.0.0",
+    "TITLE": "UB Record Management API",
+    "DESCRIPTION": "API for student record upload, extraction, and review.",
+    "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "SWAGGER_UI_DIST": "SIDECAR",
     "COMPONENT_SPLIT_REQUEST": True,
-    "EXTERNAL_DOCS": {
-        "description": "Paperless-ngx API Documentation",
-        "url": "https://docs.paperless-ngx.com/api/",
-    },
     "ENUM_NAME_OVERRIDES": {
         "MatchingAlgorithm": "documents.models.MatchingModel.MATCHING_ALGORITHMS",
     },
@@ -301,7 +286,7 @@ EMAIL_HOST_PASSWORD: Final[str] = os.getenv("PAPERLESS_EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL: Final[str] = os.getenv("PAPERLESS_EMAIL_FROM", EMAIL_HOST_USER)
 EMAIL_USE_TLS: Final[bool] = get_bool_from_env("PAPERLESS_EMAIL_USE_TLS")
 EMAIL_USE_SSL: Final[bool] = get_bool_from_env("PAPERLESS_EMAIL_USE_SSL")
-EMAIL_SUBJECT_PREFIX: Final[str] = "[Paperless-ngx] "
+EMAIL_SUBJECT_PREFIX: Final[str] = "[UB Record Management] "
 EMAIL_TIMEOUT = 30.0
 EMAIL_ENABLED = EMAIL_HOST != "localhost" or EMAIL_HOST_USER != ""
 if DEBUG:  # pragma: no cover
@@ -315,106 +300,13 @@ if DEBUG:  # pragma: no cover
 AUTHENTICATION_BACKENDS = [
     "guardian.backends.ObjectPermissionBackend",
     "django.contrib.auth.backends.ModelBackend",
-    "allauth.account.auth_backends.AuthenticationBackend",
 ]
-
-ACCOUNT_LOGOUT_ON_GET = True
-ACCOUNT_DEFAULT_HTTP_PROTOCOL = os.getenv(
-    "PAPERLESS_ACCOUNT_DEFAULT_HTTP_PROTOCOL",
-    "https",
-)
-
-ACCOUNT_ADAPTER = "paperless.adapter.CustomAccountAdapter"
-ACCOUNT_ALLOW_SIGNUPS = get_bool_from_env("PAPERLESS_ACCOUNT_ALLOW_SIGNUPS")
-ACCOUNT_DEFAULT_GROUPS = get_list_from_env("PAPERLESS_ACCOUNT_DEFAULT_GROUPS")
-
-SOCIALACCOUNT_ADAPTER = "paperless.adapter.CustomSocialAccountAdapter"
-SOCIALACCOUNT_ALLOW_SIGNUPS = get_bool_from_env(
-    "PAPERLESS_SOCIALACCOUNT_ALLOW_SIGNUPS",
-    "yes",
-)
-SOCIALACCOUNT_AUTO_SIGNUP = get_bool_from_env("PAPERLESS_SOCIAL_AUTO_SIGNUP")
-SOCIALACCOUNT_PROVIDERS = json.loads(
-    os.getenv("PAPERLESS_SOCIALACCOUNT_PROVIDERS", "{}"),
-)
-SOCIAL_ACCOUNT_DEFAULT_GROUPS = get_list_from_env(
-    "PAPERLESS_SOCIAL_ACCOUNT_DEFAULT_GROUPS",
-)
-SOCIAL_ACCOUNT_SYNC_GROUPS = get_bool_from_env("PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS")
-SOCIAL_ACCOUNT_SYNC_GROUPS_CLAIM: Final[str] = os.getenv(
-    "PAPERLESS_SOCIAL_ACCOUNT_SYNC_GROUPS_CLAIM",
-    "groups",
-)
-
-HEADLESS_TOKEN_STRATEGY = "paperless.adapter.DrfTokenStrategy"
-
-MFA_TOTP_ISSUER = "Paperless-ngx"
-
-ACCOUNT_EMAIL_SUBJECT_PREFIX = "[Paperless-ngx] "
-
-DISABLE_REGULAR_LOGIN = get_bool_from_env("PAPERLESS_DISABLE_REGULAR_LOGIN")
-REDIRECT_LOGIN_TO_SSO = get_bool_from_env("PAPERLESS_REDIRECT_LOGIN_TO_SSO")
-
-AUTO_LOGIN_USERNAME = os.getenv("PAPERLESS_AUTO_LOGIN_USERNAME")
-
-ACCOUNT_EMAIL_VERIFICATION = (
-    "none"
-    if not EMAIL_ENABLED
-    else os.getenv(
-        "PAPERLESS_ACCOUNT_EMAIL_VERIFICATION",
-        "optional",
-    )
-)
-
-ACCOUNT_EMAIL_UNKNOWN_ACCOUNTS = get_bool_from_env(
-    "PAPERLESS_ACCOUNT_EMAIL_UNKNOWN_ACCOUNTS",
-    "True",
-)
-
-ACCOUNT_SESSION_REMEMBER = get_bool_from_env(
-    "PAPERLESS_ACCOUNT_SESSION_REMEMBER",
-    "True",
-)
-SESSION_EXPIRE_AT_BROWSER_CLOSE = not ACCOUNT_SESSION_REMEMBER
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
 SESSION_COOKIE_AGE = int(
     os.getenv("PAPERLESS_SESSION_COOKIE_AGE", 60 * 60 * 24 * 7 * 3),
 )
 # https://docs.djangoproject.com/en/5.1/ref/settings/#std-setting-SESSION_ENGINE
 SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
-
-if AUTO_LOGIN_USERNAME:
-    _index = MIDDLEWARE.index("django.contrib.auth.middleware.AuthenticationMiddleware")
-    # This overrides everything the auth middleware is doing but still allows
-    # regular login in case the provided user does not exist.
-    MIDDLEWARE.insert(_index + 1, "paperless.auth.AutoLoginMiddleware")
-
-
-def _parse_remote_user_settings() -> str:
-    global MIDDLEWARE, AUTHENTICATION_BACKENDS, REST_FRAMEWORK
-    enable = get_bool_from_env("PAPERLESS_ENABLE_HTTP_REMOTE_USER")
-    enable_api = get_bool_from_env("PAPERLESS_ENABLE_HTTP_REMOTE_USER_API")
-    if enable or enable_api:
-        MIDDLEWARE.append("paperless.auth.HttpRemoteUserMiddleware")
-        AUTHENTICATION_BACKENDS.insert(
-            0,
-            "django.contrib.auth.backends.RemoteUserBackend",
-        )
-
-    if enable_api:
-        REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"].insert(
-            0,
-            "paperless.auth.PaperlessRemoteUserAuthentication",
-        )
-
-    header_name = os.getenv(
-        "PAPERLESS_HTTP_REMOTE_USER_HEADER_NAME",
-        "HTTP_REMOTE_USER",
-    )
-
-    return header_name
-
-
-HTTP_REMOTE_USER_HEADER_NAME = _parse_remote_user_settings()
 
 # X-Frame options for embedded PDF display:
 X_FRAME_OPTIONS = "SAMEORIGIN"
@@ -639,7 +531,6 @@ LOGGING = {
     "loggers": {
         "paperless": {"handlers": ["file_paperless"], "level": "DEBUG"},
         "paperless_mail": {"handlers": ["file_mail"], "level": "DEBUG"},
-        "paperless_ai": {"handlers": ["file_paperless"], "level": "DEBUG"},
         "ocrmypdf": {"handlers": ["file_paperless"], "level": "INFO"},
         "celery": {"handlers": ["file_celery"], "level": "DEBUG"},
         "kombu": {"handlers": ["file_celery"], "level": "DEBUG"},

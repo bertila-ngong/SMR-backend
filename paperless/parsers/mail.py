@@ -20,7 +20,7 @@ import tempfile
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing import Self
+from typing_extensions import Self
 
 from bleach import clean
 from bleach import linkify

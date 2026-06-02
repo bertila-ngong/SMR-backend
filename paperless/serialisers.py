@@ -1,32 +1,17 @@
-import logging
-from io import BytesIO
-
-import magic
-from allauth.mfa.adapter import get_adapter as get_mfa_adapter
-from allauth.mfa.models import Authenticator
-from allauth.mfa.totp.internal.auth import TOTP
-from allauth.socialaccount.models import SocialAccount
-from allauth.socialaccount.models import SocialApp
-from django.conf import settings
 from django.contrib.auth.models import Group
 from django.contrib.auth.models import Permission
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
-from django.core.files.uploadedfile import InMemoryUploadedFile
-from django.core.files.uploadedfile import UploadedFile
-from PIL import Image
 from rest_framework import serializers
 from rest_framework.authtoken.serializers import AuthTokenSerializer
 
 from documents.models import StudentProfile
 from documents.student_notifications import send_student_credentials_email
-from paperless.models import ApplicationConfiguration
-from paperless.network import validate_outbound_http_url
-from paperless.validators import reject_dangerous_svg
-from paperless.validators import validate_raster_image
-from paperless_mail.serialisers import ObfuscatedPasswordField
 
-logger = logging.getLogger("settings")
+
+class PasswordField(serializers.CharField):
+    def to_representation(self, value):
+        return "********"
 
 
 class PasswordValidationMixin:
@@ -36,54 +21,18 @@ class PasswordValidationMixin:
     def validate_password(self, value: str) -> str:
         if not self._has_real_password(value):
             return value
-
-        request = self.context.get("request") if hasattr(self, "context") else None
-        user = self.instance or (
-            request.user if request and hasattr(request, "user") else None
-        )
-        validate_password(value, user)  # raise ValidationError if invalid
-
+        validate_password(value, self.instance)
         return value
 
 
 class PaperlessAuthTokenSerializer(AuthTokenSerializer):
-    code = serializers.CharField(
-        label="MFA Code",
-        write_only=True,
-        required=False,
-    )
-
-    def validate(self, attrs):
-        attrs = super().validate(attrs)
-        user = attrs.get("user")
-        code = attrs.get("code")
-        mfa_adapter = get_mfa_adapter()
-        if mfa_adapter.is_mfa_enabled(user):
-            if not code:
-                raise serializers.ValidationError(
-                    "MFA code is required",
-                )
-            authenticator = Authenticator.objects.get(
-                user=user,
-                type=Authenticator.Type.TOTP,
-            )
-            if not TOTP(instance=authenticator).validate_code(
-                code,
-            ):
-                raise serializers.ValidationError(
-                    "Invalid MFA code",
-                )
-        return attrs
+    pass
 
 
 class UserSerializer(PasswordValidationMixin, serializers.ModelSerializer[User]):
-    password = ObfuscatedPasswordField(required=False)
+    password = PasswordField(required=False, write_only=True)
     is_student = serializers.BooleanField(required=False)
-    matricule = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        max_length=64,
-    )
+    matricule = serializers.CharField(required=False, allow_blank=True, max_length=64)
     date_of_birth = serializers.DateField(required=False, allow_null=True)
     password_change_required = serializers.BooleanField(required=False, default=True)
     user_permissions = serializers.SlugRelatedField(
@@ -93,11 +42,6 @@ class UserSerializer(PasswordValidationMixin, serializers.ModelSerializer[User])
         required=False,
     )
     inherited_permissions = serializers.SerializerMethodField()
-    is_mfa_enabled = serializers.SerializerMethodField()
-
-    def get_is_mfa_enabled(self, user: User) -> bool:
-        mfa_adapter = get_mfa_adapter()
-        return mfa_adapter.is_mfa_enabled(user)
 
     class Meta:
         model = User
@@ -115,7 +59,6 @@ class UserSerializer(PasswordValidationMixin, serializers.ModelSerializer[User])
             "groups",
             "user_permissions",
             "inherited_permissions",
-            "is_mfa_enabled",
             "is_student",
             "matricule",
             "date_of_birth",
@@ -148,7 +91,7 @@ class UserSerializer(PasswordValidationMixin, serializers.ModelSerializer[User])
         }
 
     def _ensure_student_permissions(self, user: User) -> None:
-        student_permissions = Permission.objects.filter(
+        permissions = Permission.objects.filter(
             codename__in=[
                 "add_document",
                 "view_document",
@@ -156,7 +99,7 @@ class UserSerializer(PasswordValidationMixin, serializers.ModelSerializer[User])
                 "view_documenttype",
             ],
         )
-        user.user_permissions.add(*student_permissions)
+        user.user_permissions.add(*permissions)
 
     def _save_student_profile(self, user: User, profile_data: dict) -> None:
         if profile_data["is_student"] is None:
@@ -189,20 +132,14 @@ class UserSerializer(PasswordValidationMixin, serializers.ModelSerializer[User])
         password = validated_data.pop("password", None)
         if self._has_real_password(password):
             instance.set_password(password)
-            instance.save()
-
-        super().update(instance, validated_data)
-        self._save_student_profile(instance, profile_data)
-        return instance
+        user = super().update(instance, validated_data)
+        self._save_student_profile(user, profile_data)
+        return user
 
     def create(self, validated_data):
         profile_data = self._pop_student_profile_data(validated_data)
-        groups = None
-        if "groups" in validated_data:
-            groups = validated_data.pop("groups")
-        user_permissions = None
-        if "user_permissions" in validated_data:
-            user_permissions = validated_data.pop("user_permissions")
+        groups = validated_data.pop("groups", None)
+        user_permissions = validated_data.pop("user_permissions", None)
         password = validated_data.pop("password", None)
         if profile_data["is_student"]:
             validated_data["username"] = (
@@ -211,13 +148,10 @@ class UserSerializer(PasswordValidationMixin, serializers.ModelSerializer[User])
             validated_data["is_staff"] = False
             validated_data["is_superuser"] = False
         user = User.objects.create(**validated_data)
-        # set groups
         if groups:
             user.groups.set(groups)
-        # set permissions
         if user_permissions:
             user.user_permissions.set(user_permissions)
-        # set password
         if self._has_real_password(password):
             user.set_password(password)
         user.save()
@@ -236,146 +170,38 @@ class GroupSerializer(serializers.ModelSerializer[Group]):
 
     class Meta:
         model = Group
-        fields = (
-            "id",
-            "name",
-            "permissions",
-        )
-
-
-class SocialAccountSerializer(serializers.ModelSerializer[SocialAccount]):
-    name = serializers.SerializerMethodField()
-
-    class Meta:
-        model = SocialAccount
-        fields = (
-            "id",
-            "provider",
-            "name",
-        )
-
-    def get_name(self, obj: SocialAccount) -> str:
-        try:
-            return obj.get_provider_account().to_str()
-        except SocialApp.DoesNotExist:
-            return "Unknown App"
+        fields = ("id", "name", "permissions")
 
 
 class ProfileSerializer(PasswordValidationMixin, serializers.ModelSerializer[User]):
-    email = serializers.EmailField(allow_blank=True, required=False)
-    password = ObfuscatedPasswordField(required=False, allow_null=False)
-    auth_token = serializers.SlugRelatedField(read_only=True, slug_field="key")
-    social_accounts = SocialAccountSerializer(
-        many=True,
-        read_only=True,
-        source="socialaccount_set",
-    )
-    is_mfa_enabled = serializers.SerializerMethodField()
-    has_usable_password = serializers.SerializerMethodField()
-
-    def get_is_mfa_enabled(self, user: User) -> bool:
-        mfa_adapter = get_mfa_adapter()
-        return mfa_adapter.is_mfa_enabled(user)
-
-    def get_has_usable_password(self, user: User) -> bool:
-        return user.has_usable_password()
+    password = PasswordField(required=False, write_only=True)
+    is_student = serializers.SerializerMethodField()
+    matricule = serializers.SerializerMethodField()
+    password_change_required = serializers.SerializerMethodField()
 
     class Meta:
         model = User
         fields = (
+            "id",
+            "username",
             "email",
-            "password",
             "first_name",
             "last_name",
-            "auth_token",
-            "social_accounts",
-            "has_usable_password",
-            "is_mfa_enabled",
+            "is_staff",
+            "is_superuser",
+            "is_student",
+            "matricule",
+            "password_change_required",
+            "password",
         )
 
+    def get_is_student(self, user: User) -> bool:
+        return hasattr(user, "student_profile")
 
-class ApplicationConfigurationSerializer(
-    serializers.ModelSerializer[ApplicationConfiguration],
-):
-    user_args = serializers.JSONField(binary=True, allow_null=True)
-    barcode_tag_mapping = serializers.JSONField(binary=True, allow_null=True)
-    llm_api_key = ObfuscatedPasswordField(
-        required=False,
-        allow_null=True,
-    )
+    def get_matricule(self, user: User) -> str:
+        profile = getattr(user, "student_profile", None)
+        return profile.matricule if profile else ""
 
-    def run_validation(self, data):
-        # Empty strings treated as None to avoid unexpected behavior
-        if "user_args" in data and data["user_args"] == "":
-            data["user_args"] = None
-        if "barcode_tag_mapping" in data and data["barcode_tag_mapping"] == "":
-            data["barcode_tag_mapping"] = None
-        if "language" in data and data["language"] == "":
-            data["language"] = None
-        if "llm_api_key" in data and data["llm_api_key"] is not None:
-            if data["llm_api_key"] == "":
-                data["llm_api_key"] = None
-            elif len(data["llm_api_key"].replace("*", "")) == 0:
-                del data["llm_api_key"]
-        return super().run_validation(data)
-
-    def update(self, instance, validated_data):
-        if instance.app_logo and "app_logo" in validated_data:
-            instance.app_logo.delete()
-        return super().update(instance, validated_data)
-
-    def _sanitize_raster_image(self, file: UploadedFile) -> UploadedFile:
-        try:
-            data = BytesIO()
-            image = Image.open(file)
-            image.save(data, format=image.format)
-            data.seek(0)
-
-            return InMemoryUploadedFile(
-                file=data,
-                field_name=file.field_name,
-                name=file.name,
-                content_type=file.content_type,
-                size=data.getbuffer().nbytes,
-                charset=getattr(file, "charset", None),
-            )
-        finally:
-            image.close()
-
-    def validate_app_logo(self, file: UploadedFile):
-        """
-        Validates and sanitizes the uploaded app logo image. Model field already restricts to
-        jpg/png/gif/svg.
-        """
-        if file:
-            mime_type = magic.from_buffer(file.read(2048), mime=True)
-
-            if mime_type == "image/svg+xml":
-                reject_dangerous_svg(file)
-            else:
-                validate_raster_image(file)
-
-                if mime_type in {"image/jpeg", "image/png"}:
-                    file = self._sanitize_raster_image(file)
-
-        return file
-
-    def validate_llm_endpoint(self, value: str | None) -> str | None:
-        if not value:
-            return value
-
-        try:
-            validate_outbound_http_url(
-                value,
-                allow_internal=settings.LLM_ALLOW_INTERNAL_ENDPOINTS,
-            )
-        except ValueError as e:
-            raise serializers.ValidationError(
-                f"Invalid LLM endpoint: {e.args[0]}, see logs for details",
-            ) from e
-
-        return value
-
-    class Meta:
-        model = ApplicationConfiguration
-        fields = "__all__"
+    def get_password_change_required(self, user: User) -> bool:
+        profile = getattr(user, "student_profile", None)
+        return bool(profile and profile.password_change_required)

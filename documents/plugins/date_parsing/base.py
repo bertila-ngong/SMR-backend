@@ -5,7 +5,7 @@ from abc import abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Self
+from typing_extensions import Self
 
 import dateparser
 
