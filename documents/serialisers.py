@@ -6,7 +6,10 @@ from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
+from documents.models import CustomField
 from documents.models import Document
+from documents.models import PaperlessTask
+from documents.models import SavedView
 from documents.models import StudentRecord
 from documents.parsers import is_mime_type_supported
 
@@ -104,3 +107,49 @@ class UploadedDocumentSerializer(serializers.ModelSerializer[Document]):
         model = Document
         fields = ("id", "title", "mime_type", "created", "added", "owner")
         read_only_fields = fields
+
+
+class SavedViewSerializer(serializers.ModelSerializer[SavedView]):
+    class Meta:
+        model = SavedView
+        fields = (
+            "id",
+            "name",
+            "owner",
+            "show_in_sidebar",
+            "show_on_dashboard",
+            "sort_field",
+            "sort_reverse",
+        )
+        read_only_fields = ("id", "owner")
+
+
+class PaperlessTaskSerializer(serializers.ModelSerializer[PaperlessTask]):
+    class Meta:
+        model = PaperlessTask
+        fields = (
+            "id",
+            "task_id",
+            "task_file_name",
+            "task_status",
+            "task_type",
+            "task_return_value",
+            "acknowledged",
+            "status",
+            "owner",
+            "created",
+        )
+        read_only_fields = fields
+
+
+class CustomFieldSerializer(serializers.ModelSerializer[CustomField]):
+    class Meta:
+        model = CustomField
+        fields = (
+            "id",
+            "name",
+            "slug",
+            "data_type",
+        )
+        read_only_fields = fields
+

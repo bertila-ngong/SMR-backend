@@ -23,20 +23,26 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.viewsets import ModelViewSet
 
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
 from documents.data_models import DocumentSource
+from documents.models import CustomField
 from documents.models import Document
 from documents.models import DocumentType
 from documents.models import MatchingModel
 from documents.models import PaperlessTask
+from documents.models import SavedView
 from documents.models import StudentProfile
 from documents.models import StudentRecord
 from documents.parsers import is_mime_type_supported
 from documents.permissions import get_objects_for_user_owner_aware
 from documents.permissions import has_perms_owner_aware
+from documents.serialisers import CustomFieldSerializer
+from documents.serialisers import PaperlessTaskSerializer
 from documents.serialisers import PostDocumentSerializer
+from documents.serialisers import SavedViewSerializer
 from documents.serialisers import StudentRecordSerializer
 from documents.student_notifications import send_pending_record_email
 from documents.student_records import STUDENT_RECORD_DOCUMENT_TYPE
@@ -310,3 +316,28 @@ class StudentRecordPdfView(StudentRecordView):
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
+
+
+class SavedViewViewSet(ModelViewSet[SavedView]):
+    serializer_class = SavedViewSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return SavedView.objects.filter(owner=self.request.user)
+
+
+class PaperlessTaskViewSet(ModelViewSet[PaperlessTask]):
+    serializer_class = PaperlessTaskSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return PaperlessTask.objects.filter(owner=self.request.user)
+
+
+class CustomFieldViewSet(ModelViewSet[CustomField]):
+    serializer_class = CustomFieldSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return CustomField.objects.all()
+
