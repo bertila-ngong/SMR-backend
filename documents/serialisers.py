@@ -2165,6 +2165,14 @@ class PostDocumentSerializer(serializers.Serializer[dict[str, Any]]):
         required=False,
     )
 
+    student_matricule = serializers.CharField(
+        label="Student matricule",
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        max_length=64,
+    )
+
     def validate_document(self, document):
         document_data = document.file.read()
         mime_type = magic.from_buffer(document_data, mime=True)
@@ -2276,25 +2284,33 @@ class StudentRecordSerializer(serializers.ModelSerializer[StudentRecord]):
         fields = (
             "id",
             "document",
+            "student",
             "data",
             "confidence",
             "raw_text",
             "extraction_source",
             "extraction_error",
             "needs_review",
+            "status",
             "extracted_at",
+            "submitted_at",
             "reviewed_at",
+            "approved_at",
             "reviewed_by",
         )
         read_only_fields = (
             "id",
             "document",
+            "student",
             "confidence",
             "raw_text",
             "extraction_source",
             "extraction_error",
             "extracted_at",
+            "status",
+            "submitted_at",
             "reviewed_at",
+            "approved_at",
             "reviewed_by",
         )
 

@@ -1188,6 +1188,16 @@ MISTRAL_CHAT_ENDPOINT = os.getenv(
 )
 MISTRAL_EXTRACT_MODEL = os.getenv("MISTRAL_EXTRACT_MODEL", "mistral-large-latest")
 
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", os.getenv("PAPERLESS_BREVO_API_KEY", ""))
+PAPERLESS_BREVO_API_KEY = BREVO_API_KEY
+BREVO_SMTP_ENDPOINT = os.getenv(
+    "BREVO_SMTP_ENDPOINT",
+    "https://api.brevo.com/v3/smtp/email",
+)
+BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", DEFAULT_FROM_EMAIL)
+BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "UB Record Management")
+BREVO_TIMEOUT_SECONDS = int(os.getenv("BREVO_TIMEOUT_SECONDS", "20"))
+
 ################################################################################
 # AI Settings                                                                  #
 ################################################################################

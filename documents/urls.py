@@ -31,6 +31,7 @@ from documents.views import ShareLinkViewSet
 from documents.views import StatisticsView
 from documents.views import StoragePathViewSet
 from documents.views import StudentRecordView
+from documents.views import StudentRecordQueueView
 from documents.views import StudentRecordPdfView
 from documents.views import SystemStatusView
 from documents.views import TagViewSet
@@ -136,6 +137,11 @@ api_urlpatterns = [
     re_path("^remote_version/", RemoteVersionView.as_view(), name="remoteversion"),
     re_path("^ui_settings/", UiSettingsView.as_view(), name="ui_settings"),
     re_path("^status/", SystemStatusView.as_view(), name="system_status"),
+    re_path(
+        r"^student_records/$",
+        StudentRecordQueueView.as_view(),
+        name="student_record_queue",
+    ),
     re_path(
         r"^student_records/(?P<document_id>\d+)/$",
         StudentRecordView.as_view(),

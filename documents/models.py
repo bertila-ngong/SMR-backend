@@ -1226,12 +1226,57 @@ class CustomFieldInstance(SoftDeleteModel):
         return str(self.value)
 
 
+class StudentProfile(models.Model):
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="student_profile",
+        verbose_name=_("user"),
+    )
+
+    matricule = models.CharField(_("matricule"), max_length=64, unique=True)
+
+    date_of_birth = models.DateField(_("date of birth"), null=True, blank=True)
+
+    password_change_required = models.BooleanField(
+        _("password change required"),
+        default=True,
+    )
+
+    created_at = models.DateTimeField(_("date created"), auto_now_add=True)
+
+    updated_at = models.DateTimeField(_("date updated"), auto_now=True)
+
+    class Meta:
+        verbose_name = _("student profile")
+        verbose_name_plural = _("student profiles")
+
+    def __str__(self):
+        return self.matricule
+
+
 class StudentRecord(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = "draft", _("Draft")
+        PENDING = "pending", _("Pending review")
+        APPROVED = "approved", _("Approved")
+        CHANGES_REQUESTED = "changes_requested", _("Changes requested")
+
     document = models.OneToOneField(
         Document,
         on_delete=models.CASCADE,
         related_name="student_record",
         verbose_name=_("document"),
+    )
+
+    student = models.ForeignKey(
+        User,
+        blank=True,
+        null=True,
+        default=None,
+        on_delete=models.SET_NULL,
+        related_name="student_records",
+        verbose_name=_("student"),
     )
 
     data = models.JSONField(
@@ -1259,9 +1304,20 @@ class StudentRecord(models.Model):
 
     needs_review = models.BooleanField(_("needs review"), default=True)
 
+    status = models.CharField(
+        _("status"),
+        max_length=32,
+        choices=Status.choices,
+        default=Status.DRAFT,
+    )
+
     extracted_at = models.DateTimeField(_("date extracted"), null=True, blank=True)
 
+    submitted_at = models.DateTimeField(_("date submitted"), null=True, blank=True)
+
     reviewed_at = models.DateTimeField(_("date reviewed"), null=True, blank=True)
+
+    approved_at = models.DateTimeField(_("date approved"), null=True, blank=True)
 
     reviewed_by = models.ForeignKey(
         User,
@@ -1293,6 +1349,7 @@ if settings.AUDIT_LOG_ENABLED:
     auditlog.register(Note)
     auditlog.register(CustomField)
     auditlog.register(CustomFieldInstance)
+    auditlog.register(StudentProfile)
     auditlog.register(StudentRecord)
 
 

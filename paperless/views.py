@@ -263,6 +263,12 @@ class ProfileView(GenericAPIView[Any]):
         password = serializer.validated_data.pop("password", None)
         if password and password.replace("*", ""):
             user.set_password(password)
+            profile = getattr(user, "student_profile", None)
+            if profile is not None:
+                profile.password_change_required = False
+                profile.save(
+                    update_fields=["password_change_required", "updated_at"],
+                )
             user.save()
 
         for key, value in serializer.validated_data.items():

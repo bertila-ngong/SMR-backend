@@ -162,6 +162,7 @@ from documents.models import SavedView
 from documents.models import ShareLink
 from documents.models import ShareLinkBundle
 from documents.models import StoragePath
+from documents.models import StudentProfile
 from documents.models import StudentRecord
 from documents.models import Tag
 from documents.models import UiSettings
@@ -228,6 +229,7 @@ from documents.student_records import export_student_record_pdf
 from documents.student_records import extract_student_record
 from documents.student_records import get_or_create_student_record
 from documents.student_records import student_record_needs_review
+from documents.student_notifications import send_pending_record_email
 from documents.tasks import build_share_link_bundle
 from documents.tasks import consume_file
 from documents.tasks import empty_trash
@@ -3151,6 +3153,7 @@ class PostDocumentView(GenericAPIView[Any]):
         correspondent_id = serializer.validated_data.get("correspondent")
         document_type_id = serializer.validated_data.get("document_type")
         record_type = serializer.validated_data.get("record_type")
+        student_matricule = serializer.validated_data.get("student_matricule")
         storage_path_id = serializer.validated_data.get("storage_path")
         tag_ids = serializer.validated_data.get("tags")
         title = serializer.validated_data.get("title")
@@ -3167,6 +3170,17 @@ class PostDocumentView(GenericAPIView[Any]):
             document_type_id = document_type.id
 
         if record_type == "student_record":
+            student_profile = getattr(request.user, "student_profile", None)
+            if student_profile is None and student_matricule:
+                student_profile = (
+                    StudentProfile.objects.select_related("user")
+                    .filter(matricule=student_matricule)
+                    .first()
+                )
+                if student_profile is None:
+                    raise ValidationError(
+                        _("No student exists with the provided matricule."),
+                    )
             additional_documents = request.FILES.getlist("additional_documents")
             if len(additional_documents) > 2:
                 raise ValidationError(
@@ -3179,6 +3193,13 @@ class PostDocumentView(GenericAPIView[Any]):
                     self._validated_upload_part(upload.name, upload.file.read()),
                 )
             doc_name, doc_data = self._combine_student_record_pages(files)
+            if student_profile is not None:
+                student_record_name = pathvalidate.sanitize_filename(
+                    f"{student_profile.matricule}_studentrecord",
+                )
+                suffix = Path(doc_name).suffix or ".pdf"
+                doc_name = f"{student_record_name}{suffix}"
+                title = title or student_record_name
 
         t = int(mktime(datetime.now().timetuple()))
 
@@ -3210,7 +3231,11 @@ class PostDocumentView(GenericAPIView[Any]):
             tag_ids=tag_ids,
             created=created,
             asn=archive_serial_number,
-            owner_id=request.user.id,
+            owner_id=(
+                student_profile.user_id
+                if record_type == "student_record" and student_profile is not None
+                else request.user.id
+            ),
             custom_fields=custom_fields,
         )
 
@@ -3231,6 +3256,12 @@ class PostDocumentView(GenericAPIView[Any]):
 class StudentRecordView(GenericAPIView[Any]):
     permission_classes = (IsAuthenticated,)
     serializer_class = StudentRecordSerializer
+
+    def is_student_user(self, user: User) -> bool:
+        return hasattr(user, "student_profile")
+
+    def is_admin_user(self, user: User) -> bool:
+        return user.is_staff or user.is_superuser
 
     def get_document(self, document_id: int) -> Document:
         document = get_object_or_404(
@@ -3260,14 +3291,83 @@ class StudentRecordView(GenericAPIView[Any]):
             raise PermissionDenied("Insufficient permissions")
 
         record = get_or_create_student_record(document)
-        serializer = self.get_serializer(record, data=request.data, partial=True)
+        action = request.data.get("action")
+        if action in {"approve", "changes_requested"} and not self.is_admin_user(
+            request.user,
+        ):
+            raise PermissionDenied("Only administrators can review student records.")
+
+        serializer_data = request.data.copy()
+        serializer_data.pop("action", None)
+        serializer = self.get_serializer(record, data=serializer_data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save(
-            needs_review=request.data.get("needs_review", False),
-            reviewed_at=timezone.now(),
-            reviewed_by=request.user,
-        )
-        return Response(serializer.data)
+        record = serializer.save()
+
+        if action == "submit":
+            record.status = StudentRecord.Status.PENDING
+            record.needs_review = True
+            record.submitted_at = timezone.now()
+            record.reviewed_at = None
+            record.approved_at = None
+            record.reviewed_by = None
+            record.student = record.student or (
+                document.owner if self.is_student_user(document.owner) else None
+            )
+            record.save(
+                update_fields=[
+                    "status",
+                    "needs_review",
+                    "submitted_at",
+                    "reviewed_at",
+                    "approved_at",
+                    "reviewed_by",
+                    "student",
+                ],
+            )
+            send_pending_record_email(record)
+        elif action == "approve":
+            record.status = StudentRecord.Status.APPROVED
+            record.needs_review = False
+            record.reviewed_at = timezone.now()
+            record.approved_at = timezone.now()
+            record.reviewed_by = request.user
+            record.save(
+                update_fields=[
+                    "status",
+                    "needs_review",
+                    "reviewed_at",
+                    "approved_at",
+                    "reviewed_by",
+                ],
+            )
+        elif action == "changes_requested":
+            record.status = StudentRecord.Status.CHANGES_REQUESTED
+            record.needs_review = True
+            record.reviewed_at = timezone.now()
+            record.approved_at = None
+            record.reviewed_by = request.user
+            record.save(
+                update_fields=[
+                    "status",
+                    "needs_review",
+                    "reviewed_at",
+                    "approved_at",
+                    "reviewed_by",
+                ],
+            )
+        else:
+            if self.is_student_user(request.user):
+                record.status = StudentRecord.Status.DRAFT
+                record.needs_review = False
+                record.save(update_fields=["status", "needs_review"])
+            elif "needs_review" in request.data:
+                record.needs_review = request.data.get("needs_review", False)
+                record.reviewed_at = timezone.now()
+                record.reviewed_by = request.user
+                record.save(
+                    update_fields=["needs_review", "reviewed_at", "reviewed_by"],
+                )
+        return Response(self.get_serializer(record).data)
 
     def post(self, request, document_id: int):
         document = self.get_document(document_id)
@@ -3295,6 +3395,36 @@ class StudentRecordView(GenericAPIView[Any]):
         record.reviewed_by = None
         record.save()
         return Response(self.get_serializer(record).data)
+
+
+class StudentRecordQueueView(GenericAPIView[Any]):
+    permission_classes = (IsAuthenticated,)
+    serializer_class = StudentRecordSerializer
+
+    def get_queryset(self):
+        queryset = StudentRecord.objects.select_related(
+            "document",
+            "student",
+            "reviewed_by",
+        ).order_by("-submitted_at", "-id")
+        user = self.request.user
+        if hasattr(user, "student_profile"):
+            return queryset.filter(Q(student=user) | Q(document__owner=user))
+        if user.is_staff or user.is_superuser:
+            return queryset
+        documents = get_objects_for_user_owner_aware(
+            user,
+            "view_document",
+            Document,
+        )
+        return queryset.filter(document__in=documents)
+
+    def get(self, request):
+        status_filter = request.query_params.get("status")
+        queryset = self.get_queryset()
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        return Response(self.get_serializer(queryset[:100], many=True).data)
 
 
 class StudentRecordPdfView(StudentRecordView):
@@ -3826,6 +3956,11 @@ class StatisticsView(GenericAPIView[Any]):
             for row in mime_type_stats
         ]
 
+        student_records = StudentRecord.objects.filter(document__in=documents)
+        student_record_status_counts = dict(
+            student_records.values_list("status").annotate(status_count=Count("id")),
+        )
+
         current_asn = Document.objects.aggregate(
             Max("archive_serial_number", default=0),
         ).get(
@@ -3847,6 +3982,19 @@ class StatisticsView(GenericAPIView[Any]):
                 "document_type_count": document_type_count,
                 "storage_path_count": storage_path_count,
                 "current_asn": current_asn,
+                "student_records_total": sum(student_record_status_counts.values()),
+                "student_records_pending": student_record_status_counts.get(
+                    StudentRecord.Status.PENDING,
+                    0,
+                ),
+                "student_records_approved": student_record_status_counts.get(
+                    StudentRecord.Status.APPROVED,
+                    0,
+                ),
+                "student_records_changes_requested": student_record_status_counts.get(
+                    StudentRecord.Status.CHANGES_REQUESTED,
+                    0,
+                ),
             },
         )
 
@@ -4060,6 +4208,14 @@ class UiSettingsView(GenericAPIView[Any]):
             "is_superuser": user.is_superuser,
             "groups": list(user.groups.values_list("id", flat=True)),
         }
+        student_profile = getattr(user, "student_profile", None)
+        if student_profile is not None:
+            user_resp["is_student"] = True
+            user_resp["matricule"] = student_profile.matricule
+            user_resp["date_of_birth"] = student_profile.date_of_birth
+            user_resp["password_change_required"] = (
+                student_profile.password_change_required
+            )
 
         if len(user.first_name) > 0:
             user_resp["first_name"] = user.first_name

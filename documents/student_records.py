@@ -668,7 +668,14 @@ def extract_student_record(document: Document) -> StudentRecordExtraction:
 
 
 def get_or_create_student_record(document: Document) -> StudentRecord:
-    record, created = StudentRecord.objects.get_or_create(document=document)
+    student = document.owner if hasattr(document.owner, "student_profile") else None
+    record, created = StudentRecord.objects.get_or_create(
+        document=document,
+        defaults={"student": student},
+    )
+    if record.student_id is None and student is not None:
+        record.student = student
+        record.save(update_fields=["student"])
     if created or not record.data:
         extraction = extract_student_record(document)
         record.data = extraction.data

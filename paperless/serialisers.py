@@ -18,6 +18,8 @@ from PIL import Image
 from rest_framework import serializers
 from rest_framework.authtoken.serializers import AuthTokenSerializer
 
+from documents.models import StudentProfile
+from documents.student_notifications import send_student_credentials_email
 from paperless.models import ApplicationConfiguration
 from paperless.network import validate_outbound_http_url
 from paperless.validators import reject_dangerous_svg
@@ -76,6 +78,14 @@ class PaperlessAuthTokenSerializer(AuthTokenSerializer):
 
 class UserSerializer(PasswordValidationMixin, serializers.ModelSerializer[User]):
     password = ObfuscatedPasswordField(required=False)
+    is_student = serializers.BooleanField(required=False)
+    matricule = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=64,
+    )
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+    password_change_required = serializers.BooleanField(required=False, default=True)
     user_permissions = serializers.SlugRelatedField(
         many=True,
         queryset=Permission.objects.exclude(content_type__app_label="admin"),
@@ -106,21 +116,87 @@ class UserSerializer(PasswordValidationMixin, serializers.ModelSerializer[User])
             "user_permissions",
             "inherited_permissions",
             "is_mfa_enabled",
+            "is_student",
+            "matricule",
+            "date_of_birth",
+            "password_change_required",
         )
 
     def get_inherited_permissions(self, obj) -> list[str]:
         return obj.get_group_permissions()
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        profile = getattr(instance, "student_profile", None)
+        data["is_student"] = profile is not None
+        data["matricule"] = profile.matricule if profile else ""
+        data["date_of_birth"] = profile.date_of_birth if profile else None
+        data["password_change_required"] = (
+            profile.password_change_required if profile else False
+        )
+        return data
+
+    def _pop_student_profile_data(self, validated_data):
+        return {
+            "is_student": validated_data.pop("is_student", None),
+            "matricule": validated_data.pop("matricule", ""),
+            "date_of_birth": validated_data.pop("date_of_birth", None),
+            "password_change_required": validated_data.pop(
+                "password_change_required",
+                True,
+            ),
+        }
+
+    def _ensure_student_permissions(self, user: User) -> None:
+        student_permissions = Permission.objects.filter(
+            codename__in=[
+                "add_document",
+                "view_document",
+                "change_document",
+                "view_documenttype",
+            ],
+        )
+        user.user_permissions.add(*student_permissions)
+
+    def _save_student_profile(self, user: User, profile_data: dict) -> None:
+        if profile_data["is_student"] is None:
+            return
+        if not profile_data["is_student"]:
+            profile = getattr(user, "student_profile", None)
+            if profile:
+                profile.delete()
+            return
+
+        matricule = profile_data["matricule"] or user.username
+        user.username = matricule
+        user.is_staff = False
+        user.is_superuser = False
+        user.save(update_fields=["username", "is_staff", "is_superuser"])
+        StudentProfile.objects.update_or_create(
+            user=user,
+            defaults={
+                "matricule": matricule,
+                "date_of_birth": profile_data["date_of_birth"],
+                "password_change_required": profile_data[
+                    "password_change_required"
+                ],
+            },
+        )
+        self._ensure_student_permissions(user)
+
     def update(self, instance, validated_data):
+        profile_data = self._pop_student_profile_data(validated_data)
         password = validated_data.pop("password", None)
         if self._has_real_password(password):
             instance.set_password(password)
             instance.save()
 
         super().update(instance, validated_data)
+        self._save_student_profile(instance, profile_data)
         return instance
 
     def create(self, validated_data):
+        profile_data = self._pop_student_profile_data(validated_data)
         groups = None
         if "groups" in validated_data:
             groups = validated_data.pop("groups")
@@ -128,6 +204,12 @@ class UserSerializer(PasswordValidationMixin, serializers.ModelSerializer[User])
         if "user_permissions" in validated_data:
             user_permissions = validated_data.pop("user_permissions")
         password = validated_data.pop("password", None)
+        if profile_data["is_student"]:
+            validated_data["username"] = (
+                profile_data["matricule"] or validated_data.get("username", "")
+            )
+            validated_data["is_staff"] = False
+            validated_data["is_superuser"] = False
         user = User.objects.create(**validated_data)
         # set groups
         if groups:
@@ -139,6 +221,9 @@ class UserSerializer(PasswordValidationMixin, serializers.ModelSerializer[User])
         if self._has_real_password(password):
             user.set_password(password)
         user.save()
+        self._save_student_profile(user, profile_data)
+        if profile_data["is_student"] and self._has_real_password(password):
+            send_student_credentials_email(user, password)
         return user
 
 
