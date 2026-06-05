@@ -19,6 +19,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.viewsets import ModelViewSet
 
 from documents.models import StudentProfile
+from documents.models import UiSettings
 from documents.permissions import PaperlessObjectPermissions
 from paperless.filters import GroupFilterSet
 from paperless.filters import UserFilterSet
@@ -191,3 +192,41 @@ class StudentsViewSet(ModelViewSet[StudentProfile]):
         student.delete()
         user.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class UiSettingsView(GenericAPIView[Any]):
+    permission_classes = [IsAuthenticated]
+
+    def _get_permissions(self, user) -> list[str]:
+        # Return bare codenames (e.g. "add_document") matching what the frontend expects
+        return [perm.split(".")[-1] for perm in user.get_all_permissions()]
+
+    def get(self, request, *args, **kwargs):
+        ui_settings, _ = UiSettings.objects.get_or_create(
+            user=request.user,
+            defaults={"settings": {}},
+        )
+        return Response(
+            {
+                "user": ProfileSerializer(request.user).data,
+                "settings": ui_settings.settings or {},
+                "permissions": self._get_permissions(request.user),
+            }
+        )
+
+    def put(self, request, *args, **kwargs):
+        ui_settings, _ = UiSettings.objects.get_or_create(
+            user=request.user,
+            defaults={"settings": {}},
+        )
+        settings_data = request.data.get("settings")
+        if isinstance(settings_data, dict):
+            ui_settings.settings = settings_data
+            ui_settings.save(update_fields=["settings"])
+        return Response(
+            {
+                "user": ProfileSerializer(request.user).data,
+                "settings": ui_settings.settings or {},
+                "permissions": self._get_permissions(request.user),
+            }
+        )

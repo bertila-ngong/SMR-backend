@@ -274,7 +274,7 @@ class RasterisedDocumentParser:
         skip_text: bool = False,
     ) -> dict[str, Any]:
         ocrmypdf_args: dict[str, Any] = {
-            "input_file_or_options": input_file,
+            "input_file": input_file,
             "output_file": output_file,
             # need to use threads, since this will be run in daemonized
             # processes via the task library.
@@ -337,7 +337,7 @@ class RasterisedDocumentParser:
                     "for compatibility with img2pdf",
                 )
                 # Replace the input file with the non-alpha
-                ocrmypdf_args["input_file_or_options"] = self.remove_alpha(input_file)
+                ocrmypdf_args["input_file"] = self.remove_alpha(input_file)
 
             if dpi:
                 self.log.debug(f"Detected DPI for image {input_file}: {dpi}")

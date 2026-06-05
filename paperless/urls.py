@@ -10,6 +10,7 @@ from paperless.views import GroupViewSet
 from paperless.views import PaperlessObtainAuthTokenView
 from paperless.views import ProfileView
 from paperless.views import StudentsViewSet
+from paperless.views import UiSettingsView
 from paperless.views import UserViewSet
 
 api_router = DefaultRouter()
@@ -20,6 +21,7 @@ api_router.register(r"students", StudentsViewSet, basename="students")
 api_urlpatterns = [
     path("token/", PaperlessObtainAuthTokenView.as_view(), name="api_token"),
     path("profile/", ProfileView.as_view(), name="profile"),
+    path("ui_settings/", UiSettingsView.as_view(), name="ui_settings"),
     *document_api_urlpatterns,
     *api_router.urls,
 ]
