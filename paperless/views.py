@@ -214,7 +214,7 @@ class UiSettingsView(GenericAPIView[Any]):
             }
         )
 
-    def put(self, request, *args, **kwargs):
+    def _save_settings(self, request):
         ui_settings, _ = UiSettings.objects.get_or_create(
             user=request.user,
             defaults={"settings": {}},
@@ -230,3 +230,9 @@ class UiSettingsView(GenericAPIView[Any]):
                 "permissions": self._get_permissions(request.user),
             }
         )
+
+    def post(self, request, *args, **kwargs):
+        return self._save_settings(request)
+
+    def put(self, request, *args, **kwargs):
+        return self._save_settings(request)

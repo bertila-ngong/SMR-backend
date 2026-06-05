@@ -1,19 +1,23 @@
-from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.forms import UserChangeForm
 from django.contrib.auth.models import User
 
 
-class PaperlessUserForm(forms.ModelForm):
+class PaperlessUserForm(UserChangeForm):
     """
     Custom form for the User model that adds validation to prevent non-superusers
     from changing the superuser status of a user.
+
+    Extends UserChangeForm so the password hash field (with its "change password"
+    link) is included on the admin change page.
     """
 
     class Meta:
         model = User
         fields = [
             "username",
+            "password",
             "first_name",
             "last_name",
             "email",
