@@ -6,6 +6,7 @@ from rest_framework.routers import DefaultRouter
 
 from documents.urls import api_urlpatterns as document_api_urlpatterns
 from documents.urls import public_urlpatterns as document_public_urlpatterns
+from documents.views import DocumentTypeViewSet
 from paperless.views import GroupViewSet
 from paperless.views import PaperlessObtainAuthTokenView
 from paperless.views import ProfileView
@@ -17,6 +18,7 @@ api_router = DefaultRouter()
 api_router.register(r"users", UserViewSet, basename="users")
 api_router.register(r"groups", GroupViewSet, basename="groups")
 api_router.register(r"students", StudentsViewSet, basename="students")
+api_router.register(r"document_types", DocumentTypeViewSet, basename="document_types")
 
 api_urlpatterns = [
     path("token/", PaperlessObtainAuthTokenView.as_view(), name="api_token"),

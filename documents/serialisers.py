@@ -8,10 +8,26 @@ from rest_framework import serializers
 
 from documents.models import CustomField
 from documents.models import Document
+from documents.models import DocumentType
 from documents.models import PaperlessTask
 from documents.models import SavedView
 from documents.models import StudentRecord
 from documents.parsers import is_mime_type_supported
+
+
+class DocumentTypeSerializer(serializers.ModelSerializer):
+    document_count = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta:
+        model = DocumentType
+        fields = (
+            "id",
+            "name",
+            "match",
+            "matching_algorithm",
+            "is_insensitive",
+            "document_count",
+        )
 
 
 class PostDocumentSerializer(serializers.Serializer[dict[str, Any]]):

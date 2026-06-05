@@ -14,6 +14,7 @@ class DocumentsConfig(AppConfig):
         from documents.signals.handlers import add_or_update_document_in_llm_index
         from documents.signals.handlers import add_to_index
         from documents.signals.handlers import assign_student_permissions  # noqa: F401
+        from documents.signals.handlers import create_student_record_on_consumption
         from documents.signals.handlers import run_workflows_added
         from documents.signals.handlers import run_workflows_updated
         from documents.signals.handlers import send_websocket_document_updated
@@ -30,6 +31,7 @@ class DocumentsConfig(AppConfig):
         document_consumption_finished.connect(add_to_index)
         document_consumption_finished.connect(run_workflows_added)
         document_consumption_finished.connect(add_or_update_document_in_llm_index)
+        document_consumption_finished.connect(create_student_record_on_consumption)
         document_updated.connect(run_workflows_updated)
         document_updated.connect(send_websocket_document_updated)
 

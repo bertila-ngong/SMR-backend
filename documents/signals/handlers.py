@@ -1383,3 +1383,23 @@ def assign_student_permissions(
             logger.warning("Permission 'documents.add_document' does not exist")
         except Exception as e:
             logger.error(f"Error assigning permission to {instance.user.username}: {str(e)}")
+
+
+def create_student_record_on_consumption(
+    sender,
+    document: Document,
+    **kwargs,
+) -> None:
+    from documents.student_records import STUDENT_RECORD_DOCUMENT_TYPE
+    from documents.student_records import get_or_create_student_record
+
+    if (
+        document.document_type is not None
+        and document.document_type.name == STUDENT_RECORD_DOCUMENT_TYPE
+    ):
+        try:
+            get_or_create_student_record(document)
+        except Exception:
+            logger.exception(
+                "Failed to create student record for document %s", document.pk
+            )

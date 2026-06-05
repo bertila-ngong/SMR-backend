@@ -40,6 +40,7 @@ from documents.parsers import is_mime_type_supported
 from documents.permissions import get_objects_for_user_owner_aware
 from documents.permissions import has_perms_owner_aware
 from documents.serialisers import CustomFieldSerializer
+from documents.serialisers import DocumentTypeSerializer
 from documents.serialisers import PaperlessTaskSerializer
 from documents.serialisers import PostDocumentSerializer
 from documents.serialisers import SavedViewSerializer
@@ -340,4 +341,13 @@ class CustomFieldViewSet(ModelViewSet[CustomField]):
 
     def get_queryset(self):
         return CustomField.objects.all()
+
+
+class DocumentTypeViewSet(ModelViewSet[DocumentType]):
+    serializer_class = DocumentTypeSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        from django.db.models import Count
+        return DocumentType.objects.annotate(document_count=Count("documents"))
 
