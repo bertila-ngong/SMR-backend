@@ -6,11 +6,9 @@ from django.conf import settings
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from documents.models import CustomField
 from documents.models import Document
 from documents.models import DocumentType
 from documents.models import PaperlessTask
-from documents.models import SavedView
 from documents.models import StudentRecord
 from documents.parsers import is_mime_type_supported
 
@@ -118,54 +116,90 @@ class StudentRecordSerializer(serializers.ModelSerializer[StudentRecord]):
         )
 
 
-class UploadedDocumentSerializer(serializers.ModelSerializer[Document]):
-    class Meta:
-        model = Document
-        fields = ("id", "title", "mime_type", "created", "added", "owner")
-        read_only_fields = fields
+class PaperlessTaskSerializer(serializers.ModelSerializer):
+    task_type_display = serializers.CharField(source="get_task_type_display", read_only=True)
+    trigger_source_display = serializers.CharField(source="get_trigger_source_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    related_document_ids = serializers.SerializerMethodField()
 
-
-class SavedViewSerializer(serializers.ModelSerializer[SavedView]):
-    class Meta:
-        model = SavedView
-        fields = (
-            "id",
-            "name",
-            "owner",
-            "show_in_sidebar",
-            "show_on_dashboard",
-            "sort_field",
-            "sort_reverse",
-        )
-        read_only_fields = ("id", "owner")
-
-
-class PaperlessTaskSerializer(serializers.ModelSerializer[PaperlessTask]):
     class Meta:
         model = PaperlessTask
         fields = (
             "id",
             "task_id",
-            "task_file_name",
-            "task_status",
             "task_type",
-            "task_return_value",
-            "acknowledged",
+            "task_type_display",
+            "trigger_source",
+            "trigger_source_display",
             "status",
-            "owner",
-            "created",
+            "status_display",
+            "date_created",
+            "date_started",
+            "date_done",
+            "duration_seconds",
+            "wait_time_seconds",
+            "input_data",
+            "result_data",
+            "acknowledged",
+            "related_document_ids",
         )
-        read_only_fields = fields
+        read_only_fields = (
+            "id", "task_id", "task_type", "task_type_display",
+            "trigger_source", "trigger_source_display",
+            "status", "status_display",
+            "date_created", "date_started", "date_done",
+            "duration_seconds", "wait_time_seconds",
+            "input_data", "result_data", "related_document_ids",
+        )
+
+    def get_related_document_ids(self, obj) -> list[int]:
+        doc_id = (obj.result_data or {}).get("document_id")
+        return [doc_id] if doc_id else []
 
 
-class CustomFieldSerializer(serializers.ModelSerializer[CustomField]):
+class DocumentSerializer(serializers.ModelSerializer):
+    document_type = serializers.PrimaryKeyRelatedField(
+        queryset=DocumentType.objects.all(), allow_null=True, required=False
+    )
+    content = serializers.SerializerMethodField()
+    original_file_name = serializers.CharField(source="original_filename", read_only=True)
+    download_url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+
     class Meta:
-        model = CustomField
+        model = Document
         fields = (
             "id",
-            "name",
-            "slug",
-            "data_type",
+            "title",
+            "content",
+            "document_type",
+            "created",
+            "added",
+            "modified",
+            "mime_type",
+            "original_file_name",
+            "page_count",
+            "archive_serial_number",
+            "download_url",
+            "thumbnail_url",
+            "owner",
         )
-        read_only_fields = fields
+
+    def get_content(self, obj) -> str | None:
+        request = self.context.get("request")
+        if request and request.query_params.get("truncate_content") == "true":
+            return (obj.content or "")[:128] if obj.content else None
+        return obj.content
+
+    def get_download_url(self, obj) -> str:
+        request = self.context.get("request")
+        if request:
+            return request.build_absolute_uri(f"/api/documents/{obj.pk}/download/")
+        return f"/api/documents/{obj.pk}/download/"
+
+    def get_thumbnail_url(self, obj) -> str:
+        request = self.context.get("request")
+        if request:
+            return request.build_absolute_uri(f"/api/documents/{obj.pk}/thumb/")
+        return f"/api/documents/{obj.pk}/thumb/"
 

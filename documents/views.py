@@ -17,9 +17,11 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from pikepdf import Pdf
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import parsers
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.exceptions import ValidationError
+from rest_framework.filters import OrderingFilter
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -28,23 +30,21 @@ from rest_framework.viewsets import ModelViewSet
 from documents.data_models import ConsumableDocument
 from documents.data_models import DocumentMetadataOverrides
 from documents.data_models import DocumentSource
-from documents.models import CustomField
 from documents.models import Document
 from documents.models import DocumentType
 from documents.models import MatchingModel
 from documents.models import PaperlessTask
-from documents.models import SavedView
 from documents.models import StudentProfile
 from documents.models import StudentRecord
 from documents.parsers import is_mime_type_supported
 from documents.permissions import get_objects_for_user_owner_aware
 from documents.permissions import has_perms_owner_aware
-from documents.serialisers import CustomFieldSerializer
+from documents.serialisers import DocumentSerializer
 from documents.serialisers import DocumentTypeSerializer
 from documents.serialisers import PaperlessTaskSerializer
 from documents.serialisers import PostDocumentSerializer
-from documents.serialisers import SavedViewSerializer
 from documents.serialisers import StudentRecordSerializer
+from paperless.views import StandardPagination
 from documents.student_notifications import send_pending_record_email
 from documents.student_records import STUDENT_RECORD_DOCUMENT_TYPE
 from documents.student_records import export_student_record_pdf
@@ -319,35 +319,72 @@ class StudentRecordPdfView(StudentRecordView):
         return response
 
 
-class SavedViewViewSet(ModelViewSet[SavedView]):
-    serializer_class = SavedViewSerializer
+class DocumentTypeViewSet(ModelViewSet[DocumentType]):
+    serializer_class = DocumentTypeSerializer
     permission_classes = (IsAuthenticated,)
+    pagination_class = StandardPagination
 
     def get_queryset(self):
-        return SavedView.objects.filter(owner=self.request.user)
+        from django.db.models import Count
+        return DocumentType.objects.annotate(
+            document_count=Count("documents")
+        ).order_by("name")
 
 
 class PaperlessTaskViewSet(ModelViewSet[PaperlessTask]):
     serializer_class = PaperlessTaskSerializer
     permission_classes = (IsAuthenticated,)
+    pagination_class = StandardPagination
+    http_method_names = ["get", "patch", "head", "options"]
 
     def get_queryset(self):
-        return PaperlessTask.objects.filter(owner=self.request.user)
+        qs = PaperlessTask.objects.order_by("-date_created")
+        acknowledged = self.request.query_params.get("acknowledged")
+        if acknowledged is not None:
+            val = acknowledged.lower() not in ("false", "0", "no")
+            qs = qs.filter(acknowledged=val)
+        return qs
+
+    def partial_update(self, request, *args, **kwargs):
+        # Only allow acknowledging tasks
+        task = self.get_object()
+        if "acknowledged" in request.data:
+            task.acknowledged = bool(request.data["acknowledged"])
+            task.save(update_fields=["acknowledged"])
+        return Response(self.get_serializer(task).data)
 
 
-class CustomFieldViewSet(ModelViewSet[CustomField]):
-    serializer_class = CustomFieldSerializer
+class DocumentViewSet(ModelViewSet[Document]):
+    serializer_class = DocumentSerializer
     permission_classes = (IsAuthenticated,)
+    pagination_class = StandardPagination
+    filter_backends = (DjangoFilterBackend, OrderingFilter)
+    ordering_fields = ("created", "added", "modified", "title")
+    ordering = ("-created",)
 
     def get_queryset(self):
-        return CustomField.objects.all()
+        qs = Document.objects.filter(deleted_at__isnull=True).select_related(
+            "document_type"
+        )
 
+        # document_type__id__in=1,2,3
+        doc_type_in = self.request.query_params.get("document_type__id__in")
+        if doc_type_in:
+            ids = [i for i in doc_type_in.split(",") if i.isdigit()]
+            if ids:
+                qs = qs.filter(document_type__id__in=ids)
 
-class DocumentTypeViewSet(ModelViewSet[DocumentType]):
-    serializer_class = DocumentTypeSerializer
-    permission_classes = (IsAuthenticated,)
+        ordering = self.request.query_params.get("ordering", "-created")
+        allowed = {"created", "-created", "added", "-added", "modified", "-modified", "title", "-title"}
+        if ordering in allowed:
+            qs = qs.order_by(ordering)
+        else:
+            qs = qs.order_by("-created")
 
-    def get_queryset(self):
-        from django.db.models import Count
-        return DocumentType.objects.annotate(document_count=Count("documents"))
+        return qs
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["request"] = self.request
+        return ctx
 
