@@ -24,6 +24,7 @@ STUDENT_RECORD_DOCUMENT_TYPE = "Student Record"
 REVIEW_CONFIDENCE_THRESHOLD = 0.75
 MISTRAL_TIMEOUT_SECONDS = 120
 MISTRAL_EXTRACTION_TIMEOUT_SECONDS = 90
+STRUCTURED_EXTRACTION_PROVIDERS = {"mistral", "groq"}
 
 DEFAULT_STUDENT_RECORD_DATA: dict[str, Any] = {
     "department": "",
@@ -308,15 +309,47 @@ def _deep_merge_student_record_data(
     return data
 
 
-def _mistral_structured_extraction(
+def _structured_extraction_config(provider: str) -> tuple[str, str, str]:
+    if provider == "groq":
+        return (
+            getattr(settings, "GROQ_API_KEY", ""),
+            getattr(
+                settings,
+                "GROQ_CHAT_ENDPOINT",
+                "https://api.groq.com/openai/v1/chat/completions",
+            ),
+            getattr(settings, "GROQ_EXTRACT_MODEL", "llama-3.3-70b-versatile"),
+        )
+
+    return (
+        getattr(settings, "MISTRAL_API_KEY", ""),
+        getattr(
+            settings,
+            "MISTRAL_CHAT_ENDPOINT",
+            "https://api.mistral.ai/v1/chat/completions",
+        ),
+        getattr(settings, "MISTRAL_EXTRACT_MODEL", "mistral-large-latest"),
+    )
+
+
+def _normalize_structured_extraction_provider(provider: str) -> str:
+    provider = (provider or "mistral").strip().lower()
+    if provider not in STRUCTURED_EXTRACTION_PROVIDERS:
+        return "mistral"
+    return provider
+
+
+def _structured_extraction(
+    provider: str,
     ocr_text: str,
 ) -> tuple[dict[str, Any], dict[str, float], str]:
-    api_key = getattr(settings, "MISTRAL_API_KEY", "")
+    provider = _normalize_structured_extraction_provider(provider)
+    api_key, endpoint, model = _structured_extraction_config(provider)
     if not api_key or not ocr_text.strip():
-        return {}, {}, ""
+        return {}, {}, f"{provider.title()} structured extraction is not configured."
 
     payload = {
-        "model": getattr(settings, "MISTRAL_EXTRACT_MODEL", "mistral-large-latest"),
+        "model": model,
         "response_format": {"type": "json_object"},
         "temperature": 0,
         "messages": [
@@ -340,11 +373,7 @@ def _mistral_structured_extraction(
     }
 
     response = requests.post(
-        getattr(
-            settings,
-            "MISTRAL_CHAT_ENDPOINT",
-            "https://api.mistral.ai/v1/chat/completions",
-        ),
+        endpoint,
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -368,6 +397,19 @@ def _mistral_structured_extraction(
         parsed.get("confidence", {}) if isinstance(parsed.get("confidence"), dict) else {},
         "",
     )
+
+
+def _configured_structured_extraction_providers() -> list[str]:
+    primary = _normalize_structured_extraction_provider(
+        getattr(settings, "STUDENT_RECORD_EXTRACT_PROVIDER", "mistral"),
+    )
+    fallback = _normalize_structured_extraction_provider(
+        getattr(settings, "STUDENT_RECORD_EXTRACT_FALLBACK_PROVIDER", "mistral"),
+    )
+    providers = [primary]
+    if fallback != primary:
+        providers.append(fallback)
+    return providers
 
 
 def _extract_label_value(text: str, labels: list[str]) -> tuple[str, float]:
@@ -626,21 +668,34 @@ def extract_student_record(document: Document) -> StudentRecordExtraction:
 
     data, confidence = _extract_student_record_from_text(text)
     if source == "mistral":
-        try:
-            structured_data, structured_confidence, structured_error = (
-                _mistral_structured_extraction(text)
-            )
-        except (requests.RequestException, json.JSONDecodeError, TypeError, ValueError) as exc:
-            logger.warning(
-                "Mistral structured extraction failed for document %s: %s",
-                document.pk,
-                exc,
-            )
-            structured_data = {}
-            structured_confidence = {}
-            structured_error = f"Structured extraction failed: {exc}"
-        else:
-            structured_error = ""
+        structured_data: dict[str, Any] = {}
+        structured_confidence: dict[str, float] = {}
+        structured_error = ""
+        structured_provider = ""
+
+        for provider in _configured_structured_extraction_providers():
+            try:
+                structured_data, structured_confidence, structured_error = (
+                    _structured_extraction(provider, text)
+                )
+            except (
+                requests.RequestException,
+                json.JSONDecodeError,
+                TypeError,
+                ValueError,
+            ) as exc:
+                logger.warning(
+                    "%s structured extraction failed for document %s: %s",
+                    provider.title(),
+                    document.pk,
+                    exc,
+                )
+                structured_data = {}
+                structured_confidence = {}
+                structured_error = f"{provider.title()} structured extraction failed: {exc}"
+            if structured_data:
+                structured_provider = provider
+                break
 
         if structured_data:
             data = _deep_merge_student_record_data(data, structured_data)
@@ -652,6 +707,8 @@ def extract_student_record(document: Document) -> StudentRecordExtraction:
                     if isinstance(score, int | float)
                 },
             }
+            if structured_provider == "groq":
+                source = "mistral_ocr_groq_extract"
         if structured_error:
             error = structured_error
 

@@ -1087,6 +1087,20 @@ MISTRAL_CHAT_ENDPOINT = os.getenv(
     "https://api.mistral.ai/v1/chat/completions",
 )
 MISTRAL_EXTRACT_MODEL = os.getenv("MISTRAL_EXTRACT_MODEL", "mistral-large-latest")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_CHAT_ENDPOINT = os.getenv(
+    "GROQ_CHAT_ENDPOINT",
+    "https://api.groq.com/openai/v1/chat/completions",
+)
+GROQ_EXTRACT_MODEL = os.getenv("GROQ_EXTRACT_MODEL", "llama-3.3-70b-versatile")
+STUDENT_RECORD_EXTRACT_PROVIDER = os.getenv(
+    "STUDENT_RECORD_EXTRACT_PROVIDER",
+    "groq" if GROQ_API_KEY else "mistral",
+).lower()
+STUDENT_RECORD_EXTRACT_FALLBACK_PROVIDER = os.getenv(
+    "STUDENT_RECORD_EXTRACT_FALLBACK_PROVIDER",
+    "mistral",
+).lower()
 
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", os.getenv("PAPERLESS_BREVO_API_KEY", ""))
 PAPERLESS_BREVO_API_KEY = BREVO_API_KEY
