@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 import re
 import threading
-from datetime import UTC
 from datetime import datetime
+from datetime import timezone
 from enum import Enum
 from typing import TYPE_CHECKING
 from typing_extensions import Self
@@ -440,7 +440,7 @@ class TantivyBackend:
             document.created.year,
             document.created.month,
             document.created.day,
-            tzinfo=UTC,
+            tzinfo=timezone.utc,
         )
         doc.add_date("created", created_date)
         doc.add_date("modified", document.modified)

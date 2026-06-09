@@ -663,7 +663,7 @@ def extract_student_record(document: Document) -> StudentRecordExtraction:
         confidence=confidence,
         raw_text=text,
         source=source,
-        error=error if source != "mistral" else "",
+        error=error,
     )
 
 
