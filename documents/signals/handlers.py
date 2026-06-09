@@ -1388,6 +1388,7 @@ def assign_student_permissions(
 def create_student_record_on_consumption(
     sender,
     document: Document,
+    original_file=None,
     **kwargs,
 ) -> None:
     from documents.student_records import STUDENT_RECORD_DOCUMENT_TYPE
@@ -1398,7 +1399,7 @@ def create_student_record_on_consumption(
         and document.document_type.name == STUDENT_RECORD_DOCUMENT_TYPE
     ):
         try:
-            get_or_create_student_record(document)
+            get_or_create_student_record(document, file_path=original_file)
         except Exception:
             logger.exception(
                 "Failed to create student record for document %s", document.pk

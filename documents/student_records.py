@@ -181,12 +181,15 @@ def _extract_text_from_mistral_response(response: dict[str, Any]) -> str:
     return "\n\n".join(parts).strip()
 
 
-def _mistral_ocr(document: Document) -> tuple[str, str]:
+def _mistral_ocr(
+    document: Document,
+    file_path: Path | None = None,
+) -> tuple[str, str]:
     api_key = getattr(settings, "MISTRAL_API_KEY", "")
     if not api_key:
         return "", "MISTRAL_API_KEY is not configured."
 
-    file_path = _document_file_path(document)
+    file_path = file_path or _document_file_path(document)
     if not file_path:
         return "", "The original document file could not be found."
 
@@ -757,11 +760,14 @@ def _extract_student_record_from_text(text: str) -> tuple[dict[str, Any], dict[s
     return data, confidence
 
 
-def extract_student_record(document: Document) -> StudentRecordExtraction:
+def extract_student_record(
+    document: Document,
+    file_path: Path | None = None,
+) -> StudentRecordExtraction:
     source = "mistral"
     error = ""
     try:
-        text, error = _mistral_ocr(document)
+        text, error = _mistral_ocr(document, file_path=file_path)
     except requests.RequestException as exc:
         logger.warning("Mistral OCR failed for document %s: %s", document.pk, exc)
         text = ""
@@ -831,7 +837,10 @@ def extract_student_record(document: Document) -> StudentRecordExtraction:
     )
 
 
-def get_or_create_student_record(document: Document) -> StudentRecord:
+def get_or_create_student_record(
+    document: Document,
+    file_path: Path | None = None,
+) -> StudentRecord:
     student = document.owner if hasattr(document.owner, "student_profile") else None
     record, created = StudentRecord.objects.get_or_create(
         document=document,
@@ -840,8 +849,15 @@ def get_or_create_student_record(document: Document) -> StudentRecord:
     if record.student_id is None and student is not None:
         record.student = student
         record.save(update_fields=["student"])
-    if created or not record.data:
-        extraction = extract_student_record(document)
+
+    should_extract = created or not record.data
+    if file_path is not None and (
+        record.extraction_source == "document_content" or record.extraction_error
+    ):
+        should_extract = True
+
+    if should_extract:
+        extraction = extract_student_record(document, file_path=file_path)
         record.data = extraction.data
         record.confidence = extraction.confidence
         record.raw_text = extraction.raw_text
