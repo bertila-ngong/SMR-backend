@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import UTC
 from datetime import date
 from datetime import datetime
 from datetime import timedelta
+from datetime import timezone
 from typing import TYPE_CHECKING
 from typing import Final
 
@@ -76,7 +76,7 @@ _SIMPLE_QUERY_TOKEN_RE = regex.compile(r"\S+")
 
 def _fmt(dt: datetime) -> str:
     """Format a datetime as an ISO 8601 UTC string for use in Tantivy range queries."""
-    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _iso_range(lo: datetime, hi: datetime) -> str:
@@ -96,39 +96,39 @@ def _date_only_range(keyword: str, tz: tzinfo) -> str:
         return date(d.year, ((d.month - 1) // 3) * 3 + 1, 1)
 
     if keyword == _TODAY:
-        lo = datetime(today.year, today.month, today.day, tzinfo=UTC)
+        lo = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
         return _iso_range(lo, lo + timedelta(days=1))
     if keyword == _YESTERDAY:
         y = today - timedelta(days=1)
-        lo = datetime(y.year, y.month, y.day, tzinfo=UTC)
-        hi = datetime(today.year, today.month, today.day, tzinfo=UTC)
+        lo = datetime(y.year, y.month, y.day, tzinfo=timezone.utc)
+        hi = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
         return _iso_range(lo, hi)
     if keyword == _PREVIOUS_WEEK:
         this_mon = today - timedelta(days=today.weekday())
         last_mon = this_mon - timedelta(weeks=1)
-        lo = datetime(last_mon.year, last_mon.month, last_mon.day, tzinfo=UTC)
-        hi = datetime(this_mon.year, this_mon.month, this_mon.day, tzinfo=UTC)
+        lo = datetime(last_mon.year, last_mon.month, last_mon.day, tzinfo=timezone.utc)
+        hi = datetime(this_mon.year, this_mon.month, this_mon.day, tzinfo=timezone.utc)
         return _iso_range(lo, hi)
     if keyword == _THIS_MONTH:
-        lo = datetime(today.year, today.month, 1, tzinfo=UTC)
+        lo = datetime(today.year, today.month, 1, tzinfo=timezone.utc)
         if today.month == 12:
-            hi = datetime(today.year + 1, 1, 1, tzinfo=UTC)
+            hi = datetime(today.year + 1, 1, 1, tzinfo=timezone.utc)
         else:
-            hi = datetime(today.year, today.month + 1, 1, tzinfo=UTC)
+            hi = datetime(today.year, today.month + 1, 1, tzinfo=timezone.utc)
         return _iso_range(lo, hi)
     if keyword == _PREVIOUS_MONTH:
         if today.month == 1:
-            lo = datetime(today.year - 1, 12, 1, tzinfo=UTC)
+            lo = datetime(today.year - 1, 12, 1, tzinfo=timezone.utc)
         else:
-            lo = datetime(today.year, today.month - 1, 1, tzinfo=UTC)
-        hi = datetime(today.year, today.month, 1, tzinfo=UTC)
+            lo = datetime(today.year, today.month - 1, 1, tzinfo=timezone.utc)
+        hi = datetime(today.year, today.month, 1, tzinfo=timezone.utc)
         return _iso_range(lo, hi)
     if keyword == _THIS_YEAR:
-        lo = datetime(today.year, 1, 1, tzinfo=UTC)
-        return _iso_range(lo, datetime(today.year + 1, 1, 1, tzinfo=UTC))
+        lo = datetime(today.year, 1, 1, tzinfo=timezone.utc)
+        return _iso_range(lo, datetime(today.year + 1, 1, 1, tzinfo=timezone.utc))
     if keyword == _PREVIOUS_YEAR:
-        lo = datetime(today.year - 1, 1, 1, tzinfo=UTC)
-        return _iso_range(lo, datetime(today.year, 1, 1, tzinfo=UTC))
+        lo = datetime(today.year - 1, 1, 1, tzinfo=timezone.utc)
+        return _iso_range(lo, datetime(today.year, 1, 1, tzinfo=timezone.utc))
     if keyword == _PREVIOUS_QUARTER:
         this_quarter = _quarter_start(today)
         last_quarter = this_quarter - relativedelta(months=3)
@@ -136,13 +136,13 @@ def _date_only_range(keyword: str, tz: tzinfo) -> str:
             last_quarter.year,
             last_quarter.month,
             last_quarter.day,
-            tzinfo=UTC,
+            tzinfo=timezone.utc,
         )
         hi = datetime(
             this_quarter.year,
             this_quarter.month,
             this_quarter.day,
-            tzinfo=UTC,
+            tzinfo=timezone.utc,
         )
         return _iso_range(lo, hi)
     raise ValueError(f"Unknown keyword: {keyword}")
@@ -158,7 +158,7 @@ def _datetime_range(keyword: str, tz: tzinfo) -> str:
     today = now_local.date()
 
     def _midnight(d: date) -> datetime:
-        return datetime(d.year, d.month, d.day, tzinfo=tz).astimezone(UTC)
+        return datetime(d.year, d.month, d.day, tzinfo=tz).astimezone(timezone.utc)
 
     def _quarter_start(d: date) -> date:
         return date(d.year, ((d.month - 1) // 3) * 3 + 1, 1)
@@ -216,7 +216,7 @@ def _rewrite_compact_date(query: str) -> str:
                 int(raw[8:10]),
                 int(raw[10:12]),
                 int(raw[12:14]),
-                tzinfo=UTC,
+                tzinfo=timezone.utc,
             )
             return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
         except ValueError:
@@ -234,7 +234,7 @@ def _rewrite_relative_range(query: str) -> str:
     """Rewrite Whoosh relative ranges ([now-7d TO now]) to concrete ISO 8601 UTC boundaries."""
 
     def _sub(m: regex.Match[str]) -> str:
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
 
         def _offset(s: str | None) -> timedelta:
             if not s:
@@ -269,7 +269,7 @@ def _rewrite_whoosh_relative_range(query: str) -> str:
     Supports: second, minute, hour, day, week, month, year (singular and plural).
     Example: ``added:[-1 week to now]`` → ``added:[2025-01-01T… TO 2025-01-08T…]``
     """
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
 
     def _sub(m: regex.Match[str]) -> str:
         n = int(m.group("n"))
@@ -313,17 +313,19 @@ def _rewrite_8digit_date(query: str, tz: tzinfo) -> str:
             year, month, day = int(raw[0:4]), int(raw[4:6]), int(raw[6:8])
             d = date(year, month, day)
             if field in _DATE_ONLY_FIELDS:
-                lo = datetime(d.year, d.month, d.day, tzinfo=UTC)
+                lo = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
                 hi = lo + timedelta(days=1)
             else:
                 # DateTimeField: use local-timezone midnight → UTC
-                lo = datetime(d.year, d.month, d.day, tzinfo=tz).astimezone(UTC)
+                lo = datetime(d.year, d.month, d.day, tzinfo=tz).astimezone(
+                    timezone.utc,
+                )
                 hi = datetime(
                     (d + timedelta(days=1)).year,
                     (d + timedelta(days=1)).month,
                     (d + timedelta(days=1)).day,
                     tzinfo=tz,
-                ).astimezone(UTC)
+                ).astimezone(timezone.utc)
             return f"{field}:[{_fmt(lo)} TO {_fmt(hi)}]"
         except ValueError:
             return m.group(0)
