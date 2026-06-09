@@ -253,13 +253,24 @@ data must match this shape:
     {"level": "Secondary", "year": "", "school": "", "qualification": ""},
     {"level": "High School", "year": "", "school": "", "qualification": ""}
   ],
-  "gce_ol": {"centre": "", "candidate_no": "", "subjects": []},
-  "gce_al": {"centre": "", "candidate_no": "", "subjects": []}
+  "gce_ol": {
+    "centre": "",
+    "candidate_no": "",
+    "subjects": [{"subject": "Chemistry", "grade": "A1 or code, or empty string"}]
+  },
+  "gce_al": {
+    "centre": "",
+    "candidate_no": "",
+    "subjects": [{"subject": "Further Maths", "grade": "A1 or code, or empty string"}]
+  }
 }
 
 confidence must be an object mapping field paths to numbers from 0 to 1.
 Use empty strings for unreadable or absent values. Do not guess. If handwriting
 is ambiguous, keep the best reading but set confidence below 0.75.
+For GCE O/L, Probatoire, GCE A/L, or Baccalaureat results, extract every numbered
+subject line even when no grade/code is visible. Put any visible grade or code in
+the subject object's "grade" field; otherwise use an empty string.
 """.strip()
 
 
@@ -290,9 +301,16 @@ def _deep_merge_student_record_data(
         if key == "documents_enclosed" and isinstance(value, dict):
             data[key] = {**base["documents_enclosed"], **value}
         elif key in ("gce_ol", "gce_al") and isinstance(value, dict):
-            data[key] = {**base[key], **value}
-            if not isinstance(data[key].get("subjects"), list):
-                data[key]["subjects"] = []
+            exam = {**base[key]}
+            for exam_key, exam_value in value.items():
+                if exam_key == "subjects":
+                    if isinstance(exam_value, list) and exam_value:
+                        exam["subjects"] = exam_value
+                elif exam_value not in (None, ""):
+                    exam[exam_key] = exam_value
+            if not isinstance(exam.get("subjects"), list):
+                exam["subjects"] = []
+            data[key] = exam
         elif key == "academic_records" and isinstance(value, list):
             rows = []
             for index, default_row in enumerate(base["academic_records"]):
@@ -435,27 +453,108 @@ def _extract_department(text: str) -> tuple[str, float]:
     return "", 0.0
 
 
-def _extract_subjects(text: str, marker: str, limit: int) -> list[dict[str, str]]:
+def _exam_chunk(text: str, marker: str, stop_marker: str | None = None) -> str:
     marker_match = re.search(marker, text, re.IGNORECASE)
     if not marker_match:
-        return []
-    chunk = text[marker_match.end() : marker_match.end() + 1000]
+        return ""
+    chunk = text[marker_match.end() : marker_match.end() + 1500]
+    if stop_marker:
+        stop_match = re.search(stop_marker, chunk, re.IGNORECASE)
+        if stop_match:
+            chunk = chunk[: stop_match.start()]
+    return chunk
+
+
+def _extract_exam_meta(chunk: str, label: str) -> tuple[str, float]:
+    match = re.search(
+        rf"{label}\s*(?:no\.?|number)?\s*[:.\-]?\s*([A-Za-z0-9 /.-]{{2,40}})",
+        chunk,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return "", 0.0
+    value = _clean(match.group(1))
+    value = re.split(r"\s{2,}|\||\n", value, maxsplit=1)[0]
+    return value[:40], 0.62 if value else 0.0
+
+
+def _looks_like_subject(value: str) -> bool:
+    if not value:
+        return False
+    if len(value) < 3 or len(value) > 80:
+        return False
+    if re.search(
+        r"centre|candidate|subject|results?|gce|probatoire|baccalaureat|written",
+        value,
+        re.IGNORECASE,
+    ):
+        return False
+    return bool(re.search(r"[A-Za-z]", value))
+
+
+def _subject_from_line(line: str) -> dict[str, str] | None:
+    line = _clean(line)
+    if not line:
+        return None
+    line = line.strip("|")
+    line = re.sub(r"^\|?\s*\d{1,2}\s*[.)|\-:]?\s*", "", line)
+    line = re.sub(r"\s*\|\s*", " ", line).strip()
+    if not line:
+        return None
+
+    match = re.match(
+        r"(?P<subject>[A-Za-z][A-Za-z0-9 /&'().-]{2,}?)"
+        r"(?:\s{2,}|\s+-\s+|\s+)"
+        r"(?P<grade>[A-F][0-9]?|[0-9]{1,3}|[A-Z]{2,}[0-9A-Z.-]{0,8})$",
+        line,
+    )
+    if match:
+        subject = _clean(match.group("subject"))
+        grade = _clean(match.group("grade")).upper()
+        if _looks_like_subject(subject):
+            return {"subject": subject[:60], "grade": grade[:12]}
+
+    if _looks_like_subject(line):
+        return {"subject": line[:60], "grade": ""}
+    return None
+
+
+def _extract_subjects_from_chunk(chunk: str, limit: int) -> list[dict[str, str]]:
     subjects = []
     for line in chunk.splitlines():
-        match = re.search(
-            r"([A-Za-z][A-Za-z /&-]{2,})\s+([A-F][0-9]?|[0-9])$",
-            line.strip(),
-        )
-        if match:
-            subjects.append(
-                {
-                    "subject": _clean(match.group(1))[:60],
-                    "grade": _clean(match.group(2))[:4],
-                },
-            )
+        if not re.match(r"^\s*\|?\s*\d{1,2}\s*[.)|\-:]?", line):
+            continue
+        subject = _subject_from_line(line)
+        if subject:
+            subjects.append(subject)
         if len(subjects) >= limit:
             break
     return subjects
+
+
+def _extract_exam(
+    text: str,
+    marker: str,
+    stop_marker: str | None,
+    limit: int,
+) -> tuple[dict[str, Any], dict[str, float]]:
+    chunk = _exam_chunk(text, marker, stop_marker)
+    exam = {"centre": "", "candidate_no": "", "subjects": []}
+    confidence: dict[str, float] = {}
+    if not chunk:
+        return exam, confidence
+
+    centre, centre_confidence = _extract_exam_meta(chunk, "centre")
+    candidate_no, candidate_confidence = _extract_exam_meta(chunk, "candidate")
+    subjects = _extract_subjects_from_chunk(chunk, limit)
+
+    exam["centre"] = centre
+    exam["candidate_no"] = candidate_no
+    exam["subjects"] = subjects
+    confidence["centre"] = centre_confidence
+    confidence["candidate_no"] = candidate_confidence
+    confidence["subjects"] = 0.62 if subjects else 0.0
+    return exam, confidence
 
 
 def student_record_needs_review(
@@ -607,7 +706,7 @@ def export_student_record_pdf(record: StudentRecord) -> bytes:
         pdf.ln()
         pdf.set_font("Helvetica", "B", 8)
         pdf.cell(145, 6, "Subject", border=1)
-        pdf.cell(45, 6, "Grade", border=1, new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(45, 6, "Grade / Code", border=1, new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 8)
         for subject in exam.get("subjects", []):
             pdf.cell(145, 6, _pdf_text(subject.get("subject")), border=1)
@@ -634,18 +733,26 @@ def _extract_student_record_from_text(text: str) -> tuple[dict[str, Any], dict[s
         data["documents_enclosed"][doc_name] = present
         confidence[f"documents_enclosed.{doc_name}"] = 0.65 if present else 0.0
 
-    data["gce_ol"]["subjects"] = _extract_subjects(
+    gce_ol, gce_ol_confidence = _extract_exam(
         text,
         r"GCE\s+O/?L|Ordinary\s+Level|Probatoire",
+        r"GCE\s+A/?L|Advanced\s+Level|Baccalaureat|II\.\s+Academic",
         10,
     )
-    data["gce_al"]["subjects"] = _extract_subjects(
+    gce_al, gce_al_confidence = _extract_exam(
         text,
         r"GCE\s+A/?L|Advanced\s+Level|Baccalaureat",
+        None,
         5,
     )
-    confidence["gce_ol.subjects"] = 0.55 if data["gce_ol"]["subjects"] else 0.0
-    confidence["gce_al.subjects"] = 0.55 if data["gce_al"]["subjects"] else 0.0
+    data["gce_ol"] = gce_ol
+    data["gce_al"] = gce_al
+    confidence["gce_ol.centre"] = gce_ol_confidence.get("centre", 0.0)
+    confidence["gce_ol.candidate_no"] = gce_ol_confidence.get("candidate_no", 0.0)
+    confidence["gce_ol.subjects"] = gce_ol_confidence.get("subjects", 0.0)
+    confidence["gce_al.centre"] = gce_al_confidence.get("centre", 0.0)
+    confidence["gce_al.candidate_no"] = gce_al_confidence.get("candidate_no", 0.0)
+    confidence["gce_al.subjects"] = gce_al_confidence.get("subjects", 0.0)
 
     return data, confidence
 
@@ -712,7 +819,7 @@ def extract_student_record(document: Document) -> StudentRecordExtraction:
         if structured_error:
             error = structured_error
 
-    if source != "mistral":
+    if source == "document_content":
         confidence = {field: min(score, 0.55) for field, score in confidence.items()}
 
     return StudentRecordExtraction(
